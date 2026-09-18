@@ -18,5 +18,23 @@
         "Game": "",
         "Language": "EN",
         "Admin": []
+    },
+    "llm": {
+        "url": "http://localhost:8080",
+        "model": "your-model-name",
+        "persona": "You are a friendly, playful character in a Bondage Club chat room. You can talk to other characters and, when appropriate, interact with them using the available tools (adding/removing items, changing poses, etc.). Keep roleplay tasteful and in-character. If a character uses a safeword, stop all actions toward them immediately.",
+        "allowedTools": [],
+        "deniedTools": [],
+        "maxToolIterations": 5,
+        "debounceMs": 1500,
+        "historyLength": 40,
+        "temperature": 0.8,
+        "maxTokens": 512,
+        "timeoutMs": 120000,
+        "safewords": ["red"],
+        "safewordSuspendMs": 600000,
+        "maxActionsPerMinute": 10,
+        "targetCooldownMs": 5000,
+        "protectedMembers": []
     }
 }
