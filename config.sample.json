@@ -25,6 +25,18 @@
         "persona": "You are a friendly, playful character in a Bondage Club chat room. You can talk to other characters and, when appropriate, interact with them using the available tools (adding/removing items, changing poses, etc.). Keep roleplay tasteful and in-character. If a character uses a safeword, stop all actions toward them immediately.",
         "allowedTools": [],
         "deniedTools": [],
+        "_availableTools": {
+            "sendMessage": "Send a message to the room or a specific character (Chat / Emote / Whisper).",
+            "listItems": "List available items (group + asset names), optionally filtered by category or search term.",
+            "listPoses": "List all valid pose names.",
+            "addItem": "Add an item (restraint, clothing, etc.) to a character. Restraints are paced to avoid anti-cheat.",
+            "removeItem": "Remove an item from a character by group.",
+            "stripAll": "Remove ALL items (restraints) from a character, paced one-by-one.",
+            "setPose": "Set a character's active pose (list of pose names).",
+            "setExpression": "Set a facial expression on a character (e.g. group 'Face').",
+            "lockItem": "Lock an item on a character so it cannot be removed.",
+            "moveSelf": "Move the bot's own character to a position on the room map."
+        },
         "maxToolIterations": 5,
         "debounceMs": 1500,
         "historyLength": 40,
@@ -35,6 +47,7 @@
         "safewordSuspendMs": 600000,
         "maxActionsPerMinute": 10,
         "targetCooldownMs": 5000,
-        "protectedMembers": []
+        "protectedMembers": [],
+        "startPose": []
     }
 }

@@ -59,6 +59,8 @@ export interface LLMConfig {
     targetCooldownMs?: number;
     /** Member numbers the bot must never act on (in addition to superusers). */
     protectedMembers?: number[];
+    /** Optional starting pose(s) applied to the bot itself on init. */
+    startPose?: string[];
     /**
      * Optional curated item catalog the LLM may use. If omitted, the bot will
      * best-effort enumerate the asset catalog at runtime.

@@ -91,3 +91,46 @@ Also from the original bot hub.
 
 Also from the original bot hub, a single player adventure. Needs a second bot account
 (user2 and password2 in the config). Probably buggy!
+
+### LLM Roleplay Bot ('llm')
+
+A roleplay bot driven by a locally-served LLM (e.g. [llama.cpp](https://github.com/ggml-org/llama.cpp)'s
+`llama-server`). The bot watches the room (chat, item changes, pose changes, people
+entering/leaving) and decides how to react — chatting, applying/removing items, changing
+poses, etc. — using the LLM's native tool calling.
+
+It is intentionally conservative and safety-first:
+
+- **Safewords**: if a character says a configured safeword, the bot immediately removes any
+  items it placed on them and suspends all actions toward them for a cooldown period.
+- **Rate limiting**: actions are throttled per-target and globally so the bot never spams.
+- **Permissions**: the bot only acts on characters it is allowed to, and never on
+  superusers or protected members.
+
+#### Running llama-server
+
+The bot talks to an OpenAI-compatible `/v1/chat/completions` endpoint. Start `llama-server`
+pointing at a GGUF model, for example:
+
+```
+llama-server \
+    -m /path/to/your-model.gguf \
+    --host 127.0.0.1 \
+    --port 8080 \
+    --ctx-size 4096 \
+    --jinja
+```
+
+The `--jinja` flag enables the chat template and native tool calling, which the bot relies on.
+
+#### Configuration
+
+Set `"game": "llm"` and fill in the `llm` section of your config (see `config.sample.json`):
+
+- `url` / `model`: the llama-server URL and model name.
+- `persona`: the system prompt describing who the bot is.
+- `allowedTools` / `deniedTools`: restrict which tools the LLM may call (empty = all).
+- `safewords` / `safewordSuspendMs`: the safeword list and how long to suspend after one is used.
+- `maxActionsPerMinute` / `targetCooldownMs`: anti-spam pacing.
+- `maxToolIterations`: how many tool calls the LLM may chain per turn.
+- `startPose`: optional pose(s) applied to the bot itself on start.
