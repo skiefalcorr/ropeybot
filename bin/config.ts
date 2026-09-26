@@ -61,6 +61,13 @@ export interface LLMConfig {
     targetCooldownMs?: number;
     /** Member numbers the bot must never act on (in addition to superusers). */
     protectedMembers?: number[];
+    /**
+     * Optional file path for full LLM logging. When set, every request
+     * (complete prompt) and response (content, tool calls, usage) is appended
+     * to this file as JSONL. llama-server's own logging is either an
+     * overview or per-token, so this captures the in-between.
+     */
+    llmLog?: string;
     /** Optional starting pose(s) applied to the bot itself on init. */
     startPose?: string[];
     /**

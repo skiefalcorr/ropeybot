@@ -50,6 +50,8 @@
         "maxActionsPerMinute": 10,
         "targetCooldownMs": 5000,
         "protectedMembers": [],
-        "startPose": []
+        "startPose": [],
+        "_llmLog": "Optional file path (e.g. \"llm.log\"). When set, every full LLM request (complete prompt) and response (content, tool calls, token usage) is appended to that file as JSONL. llama-server's own log is either an overview or per-token, so this captures the in-between.",
+        "llmLog": ""
     }
 }

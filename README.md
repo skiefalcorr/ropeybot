@@ -134,3 +134,10 @@ Set `"game": "llm"` and fill in the `llm` section of your config (see `config.sa
 - `maxActionsPerMinute` / `targetCooldownMs`: anti-spam pacing.
 - `maxToolIterations`: how many tool calls the LLM may chain per turn.
 - `startPose`: optional pose(s) applied to the bot itself on start.
+- `llmLog`: optional file path. When set, the bot appends every full LLM
+  request (the complete prompt) and response (content, tool calls, token
+  usage) to that file as JSONL — one JSON object per line. `llama-server`'s
+  own logging is either a high-level overview (no prompt context) or an
+  extremely verbose per-token dump, so this captures the in-between. Each
+  entry is tagged with a turn and iteration number so the multi-step tool
+  loop of a single agent turn can be followed.

@@ -17,9 +17,10 @@ import {
     API_Character,
     BC_Server_ChatRoomMessage,
 } from "bc-bot";
-import { LLMClient, LLMMessage } from "./llmClient";
+import { LLMClient, LLMChatOptions, LLMMessage } from "./llmClient";
 import { buildTools, resolveTools, Tool, ToolContext } from "./tools";
 import { ContextBuilder } from "./context";
+import { LLMLogger } from "./llmLogger";
 import { LLMConfig } from "../config";
 
 /**
@@ -42,6 +43,7 @@ export class LLMAgent {
     private toolMap: Map<string, Tool>;
     private ctx: ToolContext;
     private contextBuilder: ContextBuilder;
+    private logger: LLMLogger | undefined;
 
     private pendingEvents: string[] = [];
     private debounceTimer: NodeJS.Timeout | undefined;
@@ -79,6 +81,11 @@ export class LLMAgent {
             config.historyLength ?? 40,
             config.bioLength ?? 200,
         );
+
+        if (config.llmLog) {
+            this.logger = new LLMLogger(config.llmLog);
+            console.log(`LLM logging enabled -> ${config.llmLog}`);
+        }
     }
 
     /**
@@ -164,7 +171,7 @@ export class LLMAgent {
                 content:
                     "New events in the room:\n" +
                     events.join("\n") +
-                    "\n\nRespond in character. You may use tools if appropriate, or simply reply with a message.",
+                    "\n\nRespond in character. Use tools as appropriate - simple message reply won't affect anything in the room.",
             });
         } else {
             messages.push({
@@ -176,28 +183,35 @@ export class LLMAgent {
 
         const maxIterations = this.config.maxToolIterations ?? 5;
         const toolDefs = this.tools.map((t) => t.definition);
+        const chatOptions: LLMChatOptions = {
+            model: this.config.model,
+            temperature: this.config.temperature ?? 0.8,
+            max_tokens: this.config.maxTokens ?? 512,
+            tools: toolDefs.length > 0 ? toolDefs : undefined,
+        };
+
+        this.logger?.newTurn();
 
         for (let i = 0; i < maxIterations; i++) {
             let result;
+            this.logger?.logRequest(messages, chatOptions);
+            const t0 = Date.now();
             try {
-                result = await this.client.chat(messages, {
-                    model: this.config.model,
-                    temperature: this.config.temperature ?? 0.8,
-                    max_tokens: this.config.maxTokens ?? 512,
-                    tools: toolDefs.length > 0 ? toolDefs : undefined,
-                });
+                result = await this.client.chat(messages, chatOptions);
             } catch (e) {
                 console.error("LLM chat error:", e);
+                this.logger?.logError(String(e));
                 return;
             }
+            this.logger?.logResponse(result, Date.now() - t0);
 
             // Plain text response: send it to the room and finish.
-            if (result.content && result.content.trim()) {
-                const text = result.content.trim();
-                this.conn.SendMessage("Chat", text);
-                this.contextBuilder.recordOutgoing("Chat", text);
-                return;
-            }
+            // if (result.content && result.content.trim()) {
+            //     const text = result.content.trim();
+            //     this.conn.SendMessage("Chat", text);
+            //     this.contextBuilder.recordOutgoing("Chat", text);
+            //     return;
+            // }
 
             // No content and no tool calls: nothing to do.
             if (result.toolCalls.length === 0) {
@@ -306,5 +320,6 @@ export class LLMAgent {
             clearTimeout(this.debounceTimer);
             this.debounceTimer = undefined;
         }
+        this.logger?.close();
     }
 }

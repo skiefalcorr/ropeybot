@@ -158,7 +158,7 @@ export class LLMGame extends LogicBase {
                 break;
             case "PoseChanged":
                 this.agent.onEvent(
-                    `${who}'s pose changed${by}.`,
+                    `${who}'s pose changed to : ${event.character.Pose.map((P) => P.Name)}${by}.`,
                 );
                 break;
             default:

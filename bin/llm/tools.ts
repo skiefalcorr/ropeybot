@@ -222,11 +222,11 @@ export function buildTools(): Tool[] {
         name: "sendMessage",
         definition: def(
             "sendMessage",
-            "Send a message to the room or to a specific character. Use type 'Chat' for public speech, 'Emote' for actions (rendered as *...*), 'Activity' for status/activity updates, or 'Whisper' for private messages (requires memberNumber).",
+            "Send a message to the room or to a specific character. Use type 'Chat' for public speech, 'Emote' for actions (rendered as *...*), or 'Whisper' for private messages (requires memberNumber).",
             {
                 type: {
                     type: "string",
-                    enum: ["Chat", "Emote", "Activity", "Whisper"],
+                    enum: ["Chat", "Emote", "Whisper"],
                     description: "Message type",
                 },
                 content: {
