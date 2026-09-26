@@ -42,6 +42,9 @@ import { BlackjackGame } from "./casino/blackjack";
 import { ThreeCardPokerGame } from "./casino/threeCardPoker";
 
 const FREE_CHIPS = 20;
+const VOTE_DURATION_MS = 60 * 1000;
+const VOTE_COOLDOWN_MS = 5 * 60 * 1000;
+type CasinoGameName = "roulette" | "blackjack" | "threecardpoker";
 
 export function getItemsBlockingForfeit(
     char: API_Character,
@@ -112,6 +115,12 @@ export class Casino {
     private cocktailOfTheDay: Cocktail | undefined;
     public multiplier = 1;
     public lockedItems: Map<number, Map<AssetGroupName, number>> = new Map();
+    private activeVote:
+        | {
+              votes: Map<number, CasinoGameName>;
+          }
+        | undefined;
+    private lastVoteAt = 0;
 
     public constructor(
         private conn: API_Connector,
@@ -149,6 +158,7 @@ export class Casino {
         this.commandParser.register("score", this.onCommandScore);
         this.commandParser.register("bonus", this.onCommandBonusRound);
         this.commandParser.register("game", this.onCommandGame);
+        this.commandParser.register("vote", this.onCommandVote);
         this.commandParser.register("scoreboard", this.onCommandScoreboard);
         this.commandParser.register("color", this.onCommandColor);
         this.commandParser.register("refund", this.onCommandRefund);
@@ -201,7 +211,8 @@ export class Casino {
         if (
             typeof beep?.Message !== "string" ||
             beep.Message.includes("TypingStatus") ||
-            beep.Message.includes("ReqRoom")
+            beep.Message.includes("ReqRoom") ||
+            beep.BeepType.includes("LCPlayerInfo")
         ) {
             return;
         }
@@ -348,7 +359,7 @@ ${forfeitsString()}
             const player = await this.store.getPlayer(sender.MemberNumber);
             this.conn.reply(
                 msg,
-                `${sender}, you have ${player.credits} chips${sender.MemberNumber === 78366 ? ` (${Math.floor(player.credits / 100)} Lillys)` : ""}.`,
+                `${sender}, you have ${player.credits} chips${sender.MemberNumber === 78366 ? ` (${Math.floor(player.credits / (FORFEITS["cage"].value * 2.5))} Lillys)` : ""}.`,
             );
         }
     };
@@ -440,8 +451,14 @@ ${forfeitsString()}
             return;
         }
 
-        player.credits -= restraint.value * 4;
-        await this.store.savePlayer(player);
+        const spent = await this.store.trySpendCredits(
+            sender.MemberNumber,
+            restraint.value * 4,
+        );
+        if (!spent) {
+            this.conn.reply(msg, "You don't have enough chips.");
+            return;
+        }
 
         sender.Appearance.RemoveItem(restraint.items(sender)[0].Group);
 
@@ -595,8 +612,14 @@ ${forfeitsString()}
             return;
         }
 
-        player.credits -= serviceValue;
-        await this.store.savePlayer(player);
+        const spent = await this.store.trySpendCredits(
+            sender.MemberNumber,
+            serviceValue,
+        );
+        if (!spent) {
+            this.conn.reply(msg, "You don't have enough chips.");
+            return;
+        }
 
         if (serviceName === "player") {
             target.Appearance.RemoveItem("ItemDevices");
@@ -992,8 +1015,14 @@ ${forfeitsString()}
 
         const targetPlayer = await this.store.getPlayer(target.MemberNumber);
 
-        sourcePlayer.credits -= amount;
-        await this.store.savePlayer(sourcePlayer);
+        const spent = await this.store.trySpendCredits(
+            sender.MemberNumber,
+            amount,
+        );
+        if (!spent) {
+            this.conn.reply(msg, "You don't have enough chips.");
+            return;
+        }
         targetPlayer.credits += amount;
         await this.store.savePlayer(targetPlayer);
 
@@ -1122,7 +1151,8 @@ ${forfeitsString()}
         const colourLayers = FORFEITS[bet.stakeForfeit].colourLayers;
         let color = char?.Appearance?.InventoryGet("HairFront")?.GetColor();
         if (!color) color = "Default";
-        color = color[0] as BCColor;
+        if (Array.isArray(color)) color = color[0] as BCColor;
+        else color = color as BCColor;
 
         let storeColor = await this.store.getPlayer(bet.memberNumber);
         if (storeColor.color !== "default" && storeColor.color)
@@ -1307,6 +1337,162 @@ ${forfeitsString()}
             return;
         }
         this.setBio();
+    };
+
+    private onCommandVote = (
+        sender: API_Character,
+        msg: BC_Server_ChatRoomMessage,
+        args: string[],
+    ) => {
+        const game = args[0]?.toLowerCase();
+        const validGames: Array<CasinoGameName> = [
+            "roulette",
+            "blackjack",
+            "threecardpoker",
+        ];
+
+        if (this.activeVote) {
+            if (!game || !validGames.includes(game as CasinoGameName)) {
+                this.conn.reply(
+                    msg,
+                    "Usage: /bot vote <roulette|blackjack|threecardpoker>",
+                );
+                return;
+            }
+            if (
+                !this.conn.chatRoom.characters.some(
+                    (character) =>
+                        character.MemberNumber === sender.MemberNumber,
+                )
+            ) {
+                this.conn.reply(msg, "You must be in the room to vote.");
+                return;
+            }
+
+            this.activeVote.votes.set(
+                sender.MemberNumber,
+                game as CasinoGameName,
+            );
+            this.conn.reply(msg, `Your vote for ${game} has been counted.`);
+            return;
+        }
+
+        if (
+            args.length !== 1 ||
+            !game ||
+            !validGames.includes(game as CasinoGameName)
+        ) {
+            this.conn.reply(
+                msg,
+                "Usage: /bot vote <roulette|blackjack|threecardpoker>",
+            );
+            return;
+        }
+
+        const cooldownRemaining =
+            this.lastVoteAt + VOTE_COOLDOWN_MS - Date.now();
+        if (cooldownRemaining > 0) {
+            this.conn.reply(
+                msg,
+                `A new vote can be started in ${remainingTimeString(this.lastVoteAt + VOTE_COOLDOWN_MS)}.`,
+            );
+            return;
+        }
+
+        this.lastVoteAt = Date.now();
+        this.conn.SendMessage(
+            "Chat",
+            "A vote has started! For the next minute, vote with /bot vote roulette, /bot vote blackjack or /bot vote threecardpoker. You may change your vote before the vote ends.",
+        );
+        const vote = {
+            votes: new Map<number, CasinoGameName>(),
+        };
+        vote.votes.set(sender.MemberNumber, game as CasinoGameName);
+        this.activeVote = vote;
+        this.conn.reply(msg, `Your vote for ${game} has been counted.`);
+        setTimeout(() => {
+            void this.finishVote(vote);
+        }, VOTE_DURATION_MS);
+    };
+
+    private finishVote = async (
+        vote: NonNullable<typeof this.activeVote>,
+    ): Promise<void> => {
+        if (this.activeVote !== vote) {
+            return;
+        }
+        this.activeVote = undefined;
+
+        const counts = new Map<CasinoGameName, number>();
+        for (const choice of vote.votes.values()) {
+            counts.set(choice, (counts.get(choice) ?? 0) + 1);
+        }
+
+        let winningGame: CasinoGameName | undefined;
+        let winningVotes = 0;
+        let tied = false;
+        for (const [choice, count] of counts) {
+            if (count > winningVotes) {
+                winningGame = choice;
+                winningVotes = count;
+                tied = false;
+            } else if (count === winningVotes && count > 0) {
+                tied = true;
+            }
+        }
+
+        if (tied || !winningGame) {
+            this.conn.SendMessage(
+                "Chat",
+                tied
+                    ? "The vote ended in a tie. The current game will stay."
+                    : "The vote ended without a game change. The current game will stay.",
+            );
+            return;
+        }
+
+        if (this.isCurrentGame(winningGame)) {
+            this.conn.SendMessage(
+                "Chat",
+                "The vote selected the current game. The current game will stay.",
+            );
+            return;
+        }
+        this.conn.SendMessage(
+            "Chat",
+            `The vote is over. The game will switch to ${winningGame} after this round.`,
+        );
+
+        await this.switchGame(winningGame);
+        this.conn.SendMessage(
+            "Chat",
+            `The game has switched to ${winningGame}, please place your bets!`,
+        );
+        await this.setBio();
+    };
+
+    private isCurrentGame(game: CasinoGameName): boolean {
+        if (
+            (game === "roulette" && this.game instanceof RouletteGame) ||
+            (game === "blackjack" && this.game instanceof BlackjackGame) ||
+            (game === "threecardpoker" &&
+                this.game instanceof ThreeCardPokerGame)
+        ) {
+            return true;
+        }
+        return false;
+    }
+
+    private switchGame = async (game: CasinoGameName): Promise<boolean> => {
+        await this.game.endGame();
+        if (game === "roulette") {
+            this.game = new RouletteGame(this.conn, this);
+        } else if (game === "blackjack") {
+            this.game = new BlackjackGame(this.conn, this);
+        } else {
+            this.game = new ThreeCardPokerGame(this.conn, this);
+        }
+        return true;
     };
 
     private onCommandScoreboard = async (

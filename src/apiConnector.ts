@@ -62,7 +62,7 @@ export interface RoomDefinition {
 }
 
 // What the bot advertises as its game version
-const GAMEVERSION = "R130";
+const GAMEVERSION = "R132";
 const LZSTRING_MAGIC = "╬";
 
 const ServerChatMessageMaxLength = 2000; // from bc-server
@@ -125,11 +125,9 @@ export class API_Connector extends EventEmitter<ConnectorEvents> {
     private roomJoinPromise: PromiseResolve<string> | undefined;
     private roomCreatePromise: PromiseResolve<string> | undefined;
     private roomSearchPromise:
-        | PromiseResolve<ServerChatRoomSearchData[]>
-        | undefined;
+        PromiseResolve<ServerChatRoomSearchData[]> | undefined;
     private onlineFriendsPromise:
-        | PromiseResolve<ServerFriendInfo[]>
-        | undefined;
+        PromiseResolve<ServerFriendInfo[]> | undefined;
     private itemAllowQueries = new Map<
         number,
         PromiseResolve<ServerChatRoomAllowItemResponse>
@@ -770,7 +768,10 @@ export class API_Connector extends EventEmitter<ConnectorEvents> {
         while (logInSession === this.loggedIn) {
             console.log("Trying to join room...", roomDef);
             const joinResult = await this.ChatRoomJoin(roomDef.Name);
-            if (joinResult) return;
+            if (joinResult) {
+                await this.restoreRoomAdmins(roomDef);
+                return;
+            }
 
             // relinquish responsibility to the actual active login session if this
             // joinOrCreateRoom call is from an old disconnected session
@@ -781,6 +782,24 @@ export class API_Connector extends EventEmitter<ConnectorEvents> {
 
             await wait(3000);
         }
+    }
+
+    private async restoreRoomAdmins(roomDef: RoomDefinition): Promise<void> {
+        const admins = [this.Player.MemberNumber, ...roomDef.Admin];
+        const currentAdmins = new Set(this.chatRoom?.Admin ?? []);
+        const desiredAdmins = new Set(admins);
+
+        await Promise.all([
+            // Promote users who should be admins but aren't
+            ...[...desiredAdmins]
+                .filter((user) => !currentAdmins.has(user))
+                .map((user) => this.chatRoom!.promoteAdmin(user)),
+
+            // Demote users who are admins but shouldn't be
+            ...[...currentAdmins]
+                .filter((user) => !desiredAdmins.has(user))
+                .map((user) => this.chatRoom!.demoteAdmin(user)),
+        ]);
     }
 
     public ChatRoomLeave() {

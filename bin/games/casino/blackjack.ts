@@ -35,6 +35,7 @@ const BLACKJACKCOMMANDS = `Blackjack commands:
 /bot checkforfeits - Shows all forfeits currently applied to you.
 /bot score - Show your current score.
 /bot color <color or Default> - Change the color of your forfeits. 
+/bot vote <roulette|blackjack|threecardpoker> - Vote for a game to be played
 `;
 
 const BLACKJACKHELP = `Blackjack is a card game where the goal is to get as close to 21 as possible without going over.
@@ -469,10 +470,12 @@ export class BlackjackGame implements Game {
             );
             return;
         }
-        const playerStore = await this.casino.store.getPlayer(
+
+        const spent = await this.casino.store.trySpendCredits(
             sender.MemberNumber,
+            currentBet.stake,
         );
-        if (playerStore.credits < currentBet.stake) {
+        if (!spent) {
             this.conn.SendMessage(
                 "Whisper",
                 "You don't have enough chips to double down.",
@@ -480,9 +483,6 @@ export class BlackjackGame implements Game {
             );
             return;
         }
-
-        playerStore.credits -= currentBet.stake;
-        await this.casino.store.savePlayer(playerStore);
         currentBet.stake *= 2; // Double the stake
         hand.push(this.drawCard());
         currentBet.standing = true;
@@ -580,10 +580,11 @@ export class BlackjackGame implements Game {
             );
             return;
         }
-        const playerStore = await this.casino.store.getPlayer(
+        const spent = await this.casino.store.trySpendCredits(
             sender.MemberNumber,
+            currentBet.stake,
         );
-        if (playerStore.credits < currentBet.stake) {
+        if (!spent) {
             this.conn.SendMessage(
                 "Whisper",
                 "You don't have enough chips to split.",
@@ -591,8 +592,6 @@ export class BlackjackGame implements Game {
             );
             return;
         }
-        playerStore.credits -= currentBet.stake;
-        await this.casino.store.savePlayer(playerStore);
         player.bets.push({
             memberNumber: sender.MemberNumber,
             memberName: sender.toString(),
@@ -842,13 +841,11 @@ export class BlackjackGame implements Game {
                 totalWinnings += winnings;
             }
             if (totalWinnings > 0) {
-                const winnerMemberData = await this.casino.store.getPlayer(
+                await this.casino.store.addWinnings(
                     player.memberNumber,
+                    totalWinnings,
                 );
-                winnerMemberData.credits += totalWinnings;
-                winnerMemberData.score += totalWinnings;
-                await this.casino.store.savePlayer(winnerMemberData);
-                message += `${player.memberName} wins ${totalWinnings} chips!\n`;
+                message += `${player.memberName} wins ${totalWinnings} chips! \n`;
                 sendMessage = true;
             }
         }
@@ -1023,10 +1020,12 @@ export class BlackjackGame implements Game {
             return;
         }
 
-        const player = await this.casino.store.getPlayer(sender.MemberNumber);
-
         if (bet.stakeForfeit === undefined) {
-            if (player.credits - bet.stake < 0) {
+            const spent = await this.casino.store.trySpendCredits(
+                sender.MemberNumber,
+                bet.stake,
+            );
+            if (!spent) {
                 this.conn.SendMessage(
                     "Whisper",
                     `You don't have enough chips.`,
@@ -1034,9 +1033,6 @@ export class BlackjackGame implements Game {
                 );
                 return;
             }
-
-            player.credits -= bet.stake;
-            await this.casino.store.savePlayer(player);
         } else {
             const blockers = getItemsBlockingForfeit(
                 sender,
@@ -1075,7 +1071,7 @@ export class BlackjackGame implements Game {
                 this.conn.SendMessage(
                     "Whisper",
                     `You can't bet that forfeit because you've blocked: ${blocked.map((i) => i.Name).join(", ")}.`,
-                    player.memberNumber,
+                    sender.MemberNumber,
                 );
                 return;
             }
@@ -1091,6 +1087,9 @@ export class BlackjackGame implements Game {
                     .get(sender.MemberNumber)
                     ?.get(forfeitItem.Group)
             ) {
+                const player = await this.casino.store.getPlayer(
+                    sender.MemberNumber,
+                );
                 console.log(
                     `CHEATER DETECTED: ${sender} tried to bet ${bet.stakeForfeit} which should be locked`,
                 );

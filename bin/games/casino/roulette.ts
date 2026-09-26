@@ -51,6 +51,7 @@ Available commands:
 /bot checkforfeits - Shows all forfeits currently applied to you.
 /bot score - Show your current score.
 /bot color <color or Default> - Change the color of your forfeits. 
+/bot vote <roulette|blackjack|threecardpoker> - Vote for a game to be played
 `;
 
 const ROULETTEHELP = `
@@ -263,30 +264,34 @@ export class RouletteGame implements Game {
             }
         }
 
-        let stop = false;
-        this.bets
-            .filter((b) => b.memberNumber === senderCharacter.MemberNumber)
-            .forEach((b) => {
-                if (b.stakeForfeit !== undefined) {
-                    getSlotsNeededByForfeit(
-                        FORFEITS[b.stakeForfeit].items(senderCharacter),
-                    ).forEach((s) => {
-                        if (
-                            getSlotsNeededByForfeit(
-                                FORFEITS[stakeForfeit].items(senderCharacter),
-                            ).includes(s)
-                        ) {
-                            this.conn.reply(
-                                msg,
-                                "You already have a bet for the required slot in play.",
-                            );
-                            stop = true;
-                            return;
-                        }
-                    });
-                }
-            });
-        if (stop) return;
+        if (FORFEITS[stake] !== undefined) {
+            let stop = false;
+            this.bets
+                .filter((b) => b.memberNumber === senderCharacter.MemberNumber)
+                .forEach((b) => {
+                    if (b.stakeForfeit !== undefined) {
+                        getSlotsNeededByForfeit(
+                            FORFEITS[b.stakeForfeit].items(senderCharacter),
+                        ).forEach((s) => {
+                            if (
+                                getSlotsNeededByForfeit(
+                                    FORFEITS[stakeForfeit].items(
+                                        senderCharacter,
+                                    ),
+                                ).includes(s)
+                            ) {
+                                this.conn.reply(
+                                    msg,
+                                    "You already have a bet for the required slot in play.",
+                                );
+                                stop = true;
+                                return;
+                            }
+                        });
+                    }
+                });
+            if (stop) return;
+        }
 
         switch (betKind) {
             case "red":
@@ -388,16 +393,15 @@ export class RouletteGame implements Game {
             return;
         }
 
-        const player = await this.casino.store.getPlayer(sender.MemberNumber);
-
         if (bet.stakeForfeit === undefined) {
-            if (player.credits - bet.stake < 0) {
+            const spent = await this.casino.store.trySpendCredits(
+                sender.MemberNumber,
+                bet.stake,
+            );
+            if (!spent) {
                 this.conn.reply(msg, `You don't have enough chips.`);
                 return;
             }
-
-            player.credits -= bet.stake;
-            await this.casino.store.savePlayer(player);
         } else {
             const blockers = getItemsBlockingForfeit(
                 sender,
@@ -449,6 +453,9 @@ export class RouletteGame implements Game {
                     .get(sender.MemberNumber)
                     ?.get(forfeitItem.Group)
             ) {
+                const player = await this.casino.store.getPlayer(
+                    sender.MemberNumber,
+                );
                 console.log(
                     `CHEATER DETECTED: ${sender} tried to bet ${bet.stakeForfeit} which should be locked`,
                 );
@@ -600,32 +607,72 @@ export class RouletteGame implements Game {
     }
 
     private getWinnings(winningNumber: number, bet: RouletteBet): number {
-        if (bet.kind === "single" && bet.number === winningNumber) {
-            return bet.stake * 36;
-        } else if (
-            (bet.kind === "red" && rouletteColors[winningNumber] == "Red") ||
-            (bet.kind === "black" &&
-                rouletteColors[winningNumber] == "Black") ||
-            (bet.kind === "even" &&
-                winningNumber !== 0 &&
-                winningNumber % 2 === 0) ||
-            (bet.kind === "odd" && winningNumber % 2 === 1) ||
-            (bet.kind === "1-18" &&
-                winningNumber >= 1 &&
-                winningNumber <= 18) ||
-            (bet.kind === "19-36" && winningNumber >= 19 && winningNumber <= 36)
-        ) {
-            return bet.stake * 2;
-        } else if (
-            (bet.kind === "1-12" &&
-                winningNumber >= 1 &&
-                winningNumber <= 12) ||
-            (bet.kind === "13-24" &&
-                winningNumber >= 13 &&
-                winningNumber <= 24) ||
-            (bet.kind === "25-36" && winningNumber >= 25 && winningNumber <= 36)
-        ) {
-            return bet.stake * 3;
+        if (bet.stakeForfeit) {
+            if (bet.kind === "single" && bet.number === winningNumber) {
+                return bet.stake * 35;
+            } else if (
+                (bet.kind === "red" &&
+                    rouletteColors[winningNumber] == "Red") ||
+                (bet.kind === "black" &&
+                    rouletteColors[winningNumber] == "Black") ||
+                (bet.kind === "even" &&
+                    winningNumber !== 0 &&
+                    winningNumber % 2 === 0) ||
+                (bet.kind === "odd" && winningNumber % 2 === 1) ||
+                (bet.kind === "1-18" &&
+                    winningNumber >= 1 &&
+                    winningNumber <= 18) ||
+                (bet.kind === "19-36" &&
+                    winningNumber >= 19 &&
+                    winningNumber <= 36)
+            ) {
+                return bet.stake;
+            } else if (
+                (bet.kind === "1-12" &&
+                    winningNumber >= 1 &&
+                    winningNumber <= 12) ||
+                (bet.kind === "13-24" &&
+                    winningNumber >= 13 &&
+                    winningNumber <= 24) ||
+                (bet.kind === "25-36" &&
+                    winningNumber >= 25 &&
+                    winningNumber <= 36)
+            ) {
+                return bet.stake * 2;
+            }
+        } else {
+            if (bet.kind === "single" && bet.number === winningNumber) {
+                return bet.stake * 36;
+            } else if (
+                (bet.kind === "red" &&
+                    rouletteColors[winningNumber] == "Red") ||
+                (bet.kind === "black" &&
+                    rouletteColors[winningNumber] == "Black") ||
+                (bet.kind === "even" &&
+                    winningNumber !== 0 &&
+                    winningNumber % 2 === 0) ||
+                (bet.kind === "odd" && winningNumber % 2 === 1) ||
+                (bet.kind === "1-18" &&
+                    winningNumber >= 1 &&
+                    winningNumber <= 18) ||
+                (bet.kind === "19-36" &&
+                    winningNumber >= 19 &&
+                    winningNumber <= 36)
+            ) {
+                return bet.stake * 2;
+            } else if (
+                (bet.kind === "1-12" &&
+                    winningNumber >= 1 &&
+                    winningNumber <= 12) ||
+                (bet.kind === "13-24" &&
+                    winningNumber >= 13 &&
+                    winningNumber <= 24) ||
+                (bet.kind === "25-36" &&
+                    winningNumber >= 25 &&
+                    winningNumber <= 36)
+            ) {
+                return bet.stake * 3;
+            }
         }
     }
 
@@ -706,21 +753,42 @@ export class RouletteGame implements Game {
 
         await wait(2000);
 
+        const winningsByPlayer = new Map<
+            number,
+            { memberName: string; winnings: number; bets: string[] }
+        >();
         for (const bet of this.getBets()) {
-            let winnings = this.getWinnings(winningNumber, bet);
+            const winnings = this.getWinnings(winningNumber, bet);
             if (winnings > 0) {
-                const winnerMemberData = await this.casino.store.getPlayer(
+                const playerWinnings = winningsByPlayer.get(
                     bet.memberNumber,
-                );
-                winnerMemberData.credits += winnings;
-                winnerMemberData.score += winnings;
-                await this.casino.store.savePlayer(winnerMemberData);
-
-                message += `\n${bet.memberName} wins ${winnings} chips from ${bet.kind === "single" ? bet.number : bet.kind}!`;
+                ) ?? {
+                    memberName: bet.memberName,
+                    winnings: 0,
+                    bets: [],
+                };
+                playerWinnings.winnings += winnings;
+                if (
+                    !playerWinnings.bets.includes(
+                        bet.kind === "single" ? `${bet.number}` : bet.kind,
+                    )
+                )
+                    playerWinnings.bets.push(
+                        bet.kind === "single" ? `${bet.number}` : bet.kind,
+                    );
+                winningsByPlayer.set(bet.memberNumber, playerWinnings);
             } else if (bet.stakeForfeit) {
                 this.casino.applyForfeit(bet);
                 message += `\n${bet.memberName} lost from ${bet.kind === "single" ? bet.number : bet.kind} and gets: ${FORFEITS[bet.stakeForfeit].name}!`;
             }
+        }
+
+        for (const [
+            memberNumber,
+            { memberName, winnings, bets },
+        ] of winningsByPlayer) {
+            await this.casino.store.addWinnings(memberNumber, winnings);
+            message += `\n${memberName} wins ${winnings} chips from ${bets.join(", ")}!`;
         }
 
         this.casino.multiplier = 1;

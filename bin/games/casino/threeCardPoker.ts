@@ -32,6 +32,7 @@ const THREECARDPOKERCOMMANDS = `Three Card Poker commands:
 /bot checkforfeits - Shows all forfeits currently applied to you.
 /bot score - Show your current score.
 /bot color <color or Default> - Change the color of your forfeits. 
+/bot vote <roulette|blackjack|threecardpoker> - Vote for a game to be played
 `;
 
 const THREECARDPOKERHELP = `Three Card Poker is a card game where you play against the dealer using a 3-card hand.
@@ -361,12 +362,10 @@ export class ThreeCardPokerGame implements Game {
             );
 
             if (winnings > 0) {
-                const winnerMemberData = await this.casino.store.getPlayer(
+                await this.casino.store.addWinnings(
                     player.memberNumber,
+                    winnings,
                 );
-                winnerMemberData.credits += winnings;
-                winnerMemberData.score += winnings;
-                await this.casino.store.savePlayer(winnerMemberData);
                 message += `${player.memberName} wins ${winnings} chips\n`;
                 sendMessage = true;
             } else if (player.bet.stakeForfeit && winnings !== -100) {
@@ -493,9 +492,12 @@ export class ThreeCardPokerGame implements Game {
             return;
         }
 
-        const player = await this.casino.store.getPlayer(sender.MemberNumber);
         if (bet.stakeForfeit === undefined) {
-            if (player.credits - bet.stake * 2 < 0) {
+            const spent = await this.casino.store.trySpendCredits(
+                sender.MemberNumber,
+                bet.stake,
+            );
+            if (!spent) {
                 this.conn.SendMessage(
                     "Whisper",
                     `You don't have enough chips (Remember that you need double your bet so you can play).`,
@@ -503,8 +505,6 @@ export class ThreeCardPokerGame implements Game {
                 );
                 return;
             }
-            player.credits -= bet.stake;
-            await this.casino.store.savePlayer(player);
         } else {
             const blockers = getItemsBlockingForfeit(
                 sender,
@@ -542,7 +542,7 @@ export class ThreeCardPokerGame implements Game {
                 this.conn.SendMessage(
                     "Whisper",
                     `You can't bet that forfeit because you've blocked: ${blocked.map((i) => i.Name).join(", ")}.`,
-                    player.memberNumber,
+                    sender.MemberNumber,
                 );
                 return;
             }
@@ -558,6 +558,9 @@ export class ThreeCardPokerGame implements Game {
                     .get(sender.MemberNumber)
                     ?.get(forfeitItem.Group)
             ) {
+                const player = await this.casino.store.getPlayer(
+                    sender.MemberNumber,
+                );
                 console.log(
                     `CHEATER DETECTED: ${sender} tried to bet ${bet.stakeForfeit} which should be locked`,
                 );
@@ -639,8 +642,18 @@ export class ThreeCardPokerGame implements Game {
                 return;
             }
 
-            playerStore.credits -= bet.stake;
-            await this.casino.store.savePlayer(playerStore);
+            const spent = await this.casino.store.trySpendCredits(
+                sender.MemberNumber,
+                bet.stake,
+            );
+            if (!spent) {
+                this.conn.SendMessage(
+                    "Whisper",
+                    "You don't have enough chips.",
+                    sender.MemberNumber,
+                );
+                return;
+            }
             bet.stake *= 2;
         }
 

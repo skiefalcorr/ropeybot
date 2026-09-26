@@ -30,11 +30,11 @@ export interface MapRegion {
 // https://github.com/FriendsOfBC/ropeybot/issues/4
 function mapTileByName(name: string, type?: string): ChatRoomMapTile | null {
     return (
-        ChatRoomMapViewTileList.find(
+        (ChatRoomMapViewTileList.find(
             (tile) =>
                 (type === undefined || tile.Type === type) &&
                 tile.Style === name,
-        ) ?? null
+        ) as ChatRoomMapTile) ?? null
     );
 }
 

@@ -96,11 +96,47 @@ export class CasinoStore {
 
     public async savePlayer(memberData: Player): Promise<void> {
         await this.init();
-        this.players.updateOne(
+        await this.players.updateOne(
             { memberNumber: memberData.memberNumber },
             { $set: memberData },
             { upsert: true },
         );
+    }
+
+    public async addWinnings(
+        memberNumber: number,
+        credits: number,
+    ): Promise<void> {
+        await this.init();
+        await this.players.updateOne(
+            { memberNumber },
+            {
+                $inc: {
+                    credits,
+                    score: credits,
+                },
+                $setOnInsert: {
+                    memberNumber,
+                    name: "",
+                    lastFreeCredits: 0,
+                    cheatStrikes: 0,
+                    color: "Default",
+                },
+            },
+            { upsert: true },
+        );
+    }
+
+    public async trySpendCredits(
+        memberNumber: number,
+        credits: number,
+    ): Promise<boolean> {
+        await this.init();
+        const result = await this.players.updateOne(
+            { memberNumber, credits: { $gte: credits } },
+            { $inc: { credits: -credits } },
+        );
+        return result.modifiedCount === 1;
     }
 
     public async getOutfit(name: string): Promise<Outfit> {

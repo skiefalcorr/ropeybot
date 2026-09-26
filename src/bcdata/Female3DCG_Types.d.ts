@@ -33,8 +33,10 @@ declare namespace TopLeft {
 	 */
 	type Definition = number | Partial<Record<AssetPoseName | PoseTypeDefault, number>>;
 	/** See {@link ItemProperties["DrawingTop"]} */
+	// eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
 	type ItemData = Partial<Record<AssetOverride | LayerName, TopLeft.DataMutable>>;
 	/** See {@link ItemPropertiesConfig["DrawingTop"]} */
+	// eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
 	type ItemDefinition = Partial<Record<AssetOverride | LayerName, TopLeft.Definition>>;
 }
 
@@ -996,7 +998,7 @@ interface ExtendedItemConfig<OptionType extends ExtendedItemOption> {
 	/** The group name and asset name of a configuration to copy - useful if multiple items share the same config */
 	CopyConfig?: { GroupName?: AssetGroupName, AssetName: string };
 	/** An interface with element-specific drawing data for a given screen. */
-	DrawData?: ExtendedItemConfigDrawData<{}>;
+	DrawData?: ExtendedItemConfigDrawData<object>;
 	/**
 	 * A list with extra to-be allowed effect names.
 	 * Should only defined when there are effects that are exclusively managed by script hooks and thus cannot be extracted from the normal extended item options.
@@ -1319,7 +1321,7 @@ interface ModularItemOption extends Omit<ModularItemOptionConfig, "ArchetypeConf
 /** Partially parsed extended item option subtype for vibrating items */
 interface VibratingItemOptionConfig extends ExtendedItemOptionConfig {
 	Name: VibratorMode;
-	Property: ItemProperties & Pick<Required<ItemProperties>, "Intensity" | "Effect"> & Omit<ItemProperties, "TypeRecord">;
+	Property: ItemProperties & Pick<Required<ItemProperties>, "Effect"> & Omit<ItemProperties, "TypeRecord">;
 	ArchetypeConfig?: null;
 	/** Whether this option should be picked as default for NPC's (rather than just going for the first option) */
 	NPCDefault?: boolean;
@@ -1329,8 +1331,9 @@ interface VibratingItemOptionConfig extends ExtendedItemOptionConfig {
 interface VibratingItemOption extends Omit<VibratingItemOptionConfig, "ArchetypeConfig">, Omit<ExtendedItemOption, "Name" | "Property"> {
 	OptionType: "VibratingItemOption";
 	ParentData: VibratingItemData;
-	Property: ItemProperties & Pick<Required<ItemProperties>, "TypeRecord" | "Intensity" | "Effect">;
+	Property: ItemProperties & Pick<Required<ItemProperties>, "TypeRecord" | "Effect">;
 	ArchetypeData?: null;
+	Advanced: boolean;
 }
 
 /** An object defining all of the required configuration for registering a vibrator item */

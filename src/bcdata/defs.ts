@@ -238,6 +238,18 @@ export function InventoryItemVulvaFuturisticVibratorLoadHook(...args: any[]): an
 export function InventoryItemVulvaLoversVibratorDrawHook(...args: any[]): any {
 	return null;
 }
+export function InventoryItemVulvaTechnoChastityCageClickHook(...args: any[]): any {
+	return null;
+}
+export function InventoryItemVulvaTechnoChastityCageDrawHook(...args: any[]): any {
+	return null;
+}
+export function InventoryItemVulvaTechnoChastityCageExitHook(...args: any[]): any {
+	return null;
+}
+export function InventoryItemVulvaChastityCageScriptDrawHook(...args: any[]): any {
+	return null;
+}
 export function InventoryItemNeckAccessoriesCollarAutoShockUnitDraw(...args: any[]): any {
 	return null;
 }
@@ -365,6 +377,7 @@ export const InventoryItemPelvisModularChastityBeltDrawHook = undefined;
 export const InventoryItemPelvisModularChastityBeltExitHook = undefined;
 export const InventoryItemPelvisModularChastityBeltScriptDrawHook = undefined;
 export const InventoryItemPelvisModularChastityBeltVoiceTriggers = [];
+export const InventoryItemVulvaTechnoChastityCageVoiceTriggers = [];
 export const InventorySuitLatexCatsuitLoadHook = undefined;
 export const InventorySuitLatexCatsuitDrawHook = undefined;
 export const InventorySuitLatexCatsuitExitHook = undefined;
@@ -373,6 +386,8 @@ export const PortalLinkTransmitterLoadHook = undefined;
 export const PortalLinkTransmitterDrawHook = undefined;
 export const PortalLinkTransmitterClickHook = undefined;
 export const PortalLinkTransmitterExitHook = undefined;
+
+
 
 export const FuturisticAccessLoad = undefined;
 export const FuturisticAccessClick = undefined;
@@ -498,7 +513,7 @@ export const CommonNoop = undefined;
 export const CommonTime = () => 0;
 
 export const PoseAllKneeling: readonly AssetPoseName[] = Object.freeze(["Kneel", "KneelingSpread"]);
-export const PoseAllStanding: readonly AssetPoseName[] = Object.freeze(["BaseLower", "LegsClosed", "Spread"]);
+export const PoseAllStanding: readonly AssetPoseName[] = Object.freeze(["TapedHands" , "BaseUpper" , "BackBoxTie" , "BackCuffs" , "BackElbowTouch" , "OverTheHead" , "Yoked" , "BaseLower" , "Kneel" , "KneelingSpread" , "LegsClosed", "Spread", "Hogtied" , "AllFours" , "Suspension"]);
 
 export const InterfaceTextGet = (x: string) => undefined;
 

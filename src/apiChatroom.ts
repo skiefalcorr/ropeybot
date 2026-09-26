@@ -343,45 +343,45 @@ export class API_Chatroom extends EventEmitter<ChatRoomEvents> {
             return;
         }
 
-        const oldItemIndex = charData.Appearance.findIndex(
+        const oldAppearance = charObject.Appearance.Appearance;
+        const oldItemIndex = oldAppearance.findIndex(
             (i) => i.Group === itemUpdate.Group,
         );
+        const appearance = oldAppearance
+            .map((item) => item.getData())
+            .filter((item) => item.Group !== itemUpdate.Group);
+
         if (itemUpdate.Name) {
             const item: ServerItemBundle = {
                 ...itemUpdate,
                 Name: itemUpdate.Name!,
             };
-            // An item is being added or updated
-            if (oldItemIndex !== -1) {
-                // The group was present previously: it's an update
-                const oldItemObject =
-                    charObject.Appearance.Appearance[oldItemIndex];
-                charData.Appearance[oldItemIndex] = item;
-                charObject.rebuildAppearance();
-                const newItemObject = charObject.Appearance.Appearance.find(
-                    (i) => item.Group === i.Group,
-                )!;
+            appearance.push(item);
+        }
+
+        // Keep the cached room data and the character object in sync. The
+        // player has its own data object, so mutating charData alone leaves
+        // Player.Appearance stale and can cause a later account update to
+        // restore the old item.
+        charObject.update({ Appearance: appearance });
+        charData.Appearance = charObject.Appearance.getAppearanceData();
+
+        if (itemUpdate.Name) {
+            const itemObject = charObject.Appearance.InventoryGet(
+                itemUpdate.Group,
+            )!;
+            if (oldItemIndex === -1) {
+                this.emit("ItemAdd", charObject, itemObject);
+            } else {
                 this.emit(
                     "ItemChange",
                     charObject,
-                    newItemObject,
-                    oldItemObject,
+                    itemObject,
+                    oldAppearance[oldItemIndex],
                 );
-            } else {
-                // An item is being added
-                charData.Appearance.push(item);
-                charObject.rebuildAppearance();
-                const itemObject = charObject.Appearance.Appearance.find(
-                    (i) => item.Group === i.Group,
-                )!;
-                this.emit("ItemAdd", charObject, itemObject);
             }
         } else if (oldItemIndex !== -1) {
-            // An item is being removed
-            const itemObject = charObject.Appearance.Appearance[oldItemIndex];
-            charData.Appearance.splice(oldItemIndex, 1);
-            charObject.rebuildAppearance();
-            this.emit("ItemRemove", charObject, [itemObject]);
+            this.emit("ItemRemove", charObject, [oldAppearance[oldItemIndex]]);
         }
     }
 
@@ -420,8 +420,8 @@ export class API_Chatroom extends EventEmitter<ChatRoomEvents> {
     }
 
     public onReorder(memberNos: number[]): void {
-        this.data.Character = memberNos.map(
-            (num) => this.data.Character.find((m) => m.MemberNumber === num)!,
+        this.data.Character = memberNos.map((num) =>
+            this.data.Character.find((m) => m.MemberNumber === num)!,
         );
         this.reorderWatcher.emit("reorder");
     }

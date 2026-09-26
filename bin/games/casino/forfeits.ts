@@ -135,7 +135,7 @@ export const FORFEITS: Record<string, Forfeit> = {
     },
     pet: {
         name: "Pet",
-        value: 44,
+        value: 28,
         items: () => [AssetGet("ItemArms", "ShinyPetSuit")],
         lock: AssetGet("ItemMisc", "TimerPasswordPadlock"),
         lockTimeMs: 20 * 60 * 1000,
