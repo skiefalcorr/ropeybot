@@ -26,7 +26,8 @@ import { LLMChatOptions, LLMChatResult, LLMMessage } from "./llmClient";
  *
  * Entries:
  *  - { kind: "request",  messages, options }  — the full conversation sent
- *  - { kind: "response", content, toolCalls, finishReason, usage, elapsedMs }
+ *  - { kind: "response", content, toolCalls, finishReason, usage, elapsedMs,
+ *     reasoningContent? }  — reasoningContent only for thinking models
  *  - { kind: "error",    error }              — a failed chat request
  *
  * Every entry carries { ts, turn, iteration } so the multi-step tool loop of
@@ -84,7 +85,7 @@ export class LLMLogger {
 
     /** Log the response received for the most recent request. */
     logResponse(result: LLMChatResult, elapsedMs: number): void {
-        this.write({
+        const entry: Record<string, unknown> = {
             ts: new Date().toISOString(),
             turn: this.turn,
             iteration: this.iteration,
@@ -94,7 +95,11 @@ export class LLMLogger {
             toolCalls: result.toolCalls,
             finishReason: result.finishReason,
             usage: result.usage,
-        });
+        };
+        if (result.reasoningContent) {
+            entry.reasoningContent = result.reasoningContent;
+        }
+        this.write(entry);
     }
 
     /** Log a failed chat request. */

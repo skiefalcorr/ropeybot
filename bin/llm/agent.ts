@@ -171,7 +171,7 @@ export class LLMAgent {
                 content:
                     "New events in the room:\n" +
                     events.join("\n") +
-                    "\n\nRespond in character. Use tools as appropriate - simple message reply won't affect anything in the room.",
+                    "\n\nRespond in character. Use tools for everything. But you can write OOC messages in parentheses (Like this) if you want.",
             });
         } else {
             messages.push({
@@ -206,12 +206,12 @@ export class LLMAgent {
             this.logger?.logResponse(result, Date.now() - t0);
 
             // Plain text response: send it to the room and finish.
-            // if (result.content && result.content.trim()) {
-            //     const text = result.content.trim();
-            //     this.conn.SendMessage("Chat", text);
-            //     this.contextBuilder.recordOutgoing("Chat", text);
-            //     return;
-            // }
+            if (result.content && result.content.trim()) {
+                const text = result.content.trim();
+                this.conn.SendMessage("Chat", text);
+                this.contextBuilder.recordOutgoing("Chat", text);
+                return;
+            }
 
             // No content and no tool calls: nothing to do.
             if (result.toolCalls.length === 0) {

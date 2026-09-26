@@ -18,7 +18,34 @@ import {
     BC_Server_ChatRoomMessage,
     isNaked,
 } from "bc-bot";
+import lzString from "lz-string";
 import { CLOTHING_GROUPS } from "./tools";
+
+/**
+ * Decodes a character description that may be LZ-compressed.
+ *
+ * The game compresses long text descriptions with lz-string's
+ * `compressToUTF16` and prefixes the result with the sentinel character ╬
+ * (\u256C) to mark it as compressed. Short/uncompressed descriptions have no
+ * prefix.
+ */
+export function decodeDescription(raw: string): string {
+    if (!raw) return "";
+
+    if (raw.startsWith("╬")) {
+        const compressedData = raw.slice(1);
+
+        // Note: LZString.compressToUTF16 appends a trailing space by design.
+        // If the transport or an editor trimmed trailing whitespace, try both.
+        const decompressed =
+            lzString.decompressFromUTF16(compressedData) ||
+            lzString.decompressFromUTF16(compressedData + " ");
+
+        return decompressed ?? raw;
+    }
+
+    return raw;
+}
 
 /**
  * A single entry in the rolling chat history.
@@ -137,11 +164,11 @@ export class ContextBuilder {
             persona,
             "",
             "## How you act",
-            "- You can send messages and use the available tools to interact with characters.",
-            "- Use listItems (restraints) / listClothing (clothing) / listPoses to discover valid names before using them.",
+            "- You can use the available tools to interact with characters.",
+            "- Use listItems (for gear and restraints) / listClothing (for clothing) to discover valid names before using them.",
             "- Act naturally and in-character. Do not mention tools, prompts, or that you are an AI.",
-            "- If a character uses a safeword, STOP all actions toward them immediately and respect their request.",
-            "- Be mindful of consent and comfort. Keep interactions tasteful.",
+            //"- If a character uses a safeword, STOP all actions toward them immediately and respect their request.",
+            //"- Be mindful of consent and comfort. Keep interactions tasteful.",
             "- A fresh 'Current room state' snapshot is provided at the end of the conversation. Trust it over anything you remember.",
         ].join("\n");
     }
@@ -166,6 +193,7 @@ export class ContextBuilder {
 
         for (const char of room.characters) {
             if (char.MemberNumber === me.MemberNumber) continue;
+            lines.push("Next character:");
             lines.push(describeCharacter(char, this.bioLength));
         }
 
@@ -195,12 +223,12 @@ export function describeCharacter(
     bioLength: number = 2000,
 ): string {
     const parts: string[] = [];
-    parts.push(`${char.NickName} (member #${char.MemberNumber})`);
+    parts.push(`${char.NickName.length != 0? char.NickName : char.Name} (member #${char.MemberNumber})`);
 
     const gender = genderLabel(char);
     if (gender) parts.push(gender);
 
-    const bio = char.Description?.trim() ?? "";
+    const bio = decodeDescription(char.Description ?? "").trim();
     if (bio && bioLength > 0) {
         parts.push(
             `bio: ${bio.length > bioLength ? bio.slice(0, bioLength) + "…" : bio}`,

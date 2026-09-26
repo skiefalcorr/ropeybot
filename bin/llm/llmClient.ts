@@ -73,6 +73,11 @@ export interface LLMChatResult {
     toolCalls: LLMToolCall[];
     finishReason: string;
     usage?: { prompt_tokens: number; completion_tokens: number };
+    /**
+     * Present when the model is a thinking/reasoning model (e.g. Qwen3) and
+     * the server returns its chain-of-thought in `reasoning_content`.
+     */
+    reasoningContent?: string | null;
 }
 
 export class LLMClient {
@@ -146,6 +151,7 @@ export class LLMClient {
                 message?: {
                     content?: string | null;
                     tool_calls?: LLMToolCall[];
+                    reasoning_content?: string | null;
                 };
                 finish_reason?: string;
             }[];
@@ -160,6 +166,7 @@ export class LLMClient {
             toolCalls: message?.tool_calls ?? [],
             finishReason: choice?.finish_reason ?? "stop",
             usage: data.usage,
+            reasoningContent: message?.reasoning_content ?? null,
         };
     }
 

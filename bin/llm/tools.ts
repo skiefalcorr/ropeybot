@@ -15,6 +15,7 @@
 import {
     API_Connector,
     API_Character,
+    API_AppearanceItem,
     AssetGet,
     BC_AppearanceItem,
     isBind,
@@ -195,15 +196,15 @@ function checkRateLimit(
         return `Rate limit: already performed ${maxPerMinute} actions this minute. Wait before acting again.`;
     }
 
-    if (targetMemberNumber !== undefined) {
-        const cooldown = ctx.config.targetCooldownMs ?? 5000;
-        const last = ctx.lastActionByTarget.get(targetMemberNumber) ?? 0;
-        if (now - last < cooldown) {
-            return `Cooldown: you just acted on this character ${Math.round(
-                (cooldown - (now - last)) / 1000,
-            )}s ago. Wait a moment.`;
-        }
-    }
+    // if (targetMemberNumber !== undefined) {
+    //     const cooldown = ctx.config.targetCooldownMs ?? 5000;
+    //     const last = ctx.lastActionByTarget.get(targetMemberNumber) ?? 0;
+    //     if (now - last < cooldown) {
+    //         return `Cooldown: you just acted on this character ${Math.round(
+    //             (cooldown - (now - last)) / 1000,
+    //         )}s ago. Wait a moment.`;
+    //     }
+    // }
 
     ctx.actionTimestamps.push(now);
     if (targetMemberNumber !== undefined) {
@@ -289,7 +290,7 @@ export function buildTools(): Tool[] {
                 },
                 limit: {
                     type: "number",
-                    description: "Max results to return (default 40)",
+                    description: "Max results to return (default 100)",
                 },
             },
         ),
@@ -298,8 +299,8 @@ export function buildTools(): Tool[] {
             const fetish = args.fetish as string | undefined;
             const search = (args.search as string | undefined)?.toLowerCase();
             const limit = Math.min(
-                Number(args.limit ?? 40),
-                100,
+                Number(args.limit ?? 100),
+                200,
             );
             const out: string[] = [];
             for (const grp of CATALOG) {
@@ -455,7 +456,7 @@ export function buildTools(): Tool[] {
             const item: BC_AppearanceItem = AssetGet(
                 group as never,
                 asset,
-            ) as BC_AppearanceItem;
+            );
             try {
                 if (isBind(item)) {
                     // Paced, anti-cheat-safe application.
