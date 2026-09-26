@@ -23,7 +23,7 @@ import { LLMToolDefinition } from "./llmClient";
 import { LLMConfig } from "../config";
 
 // Deep import of the compiled asset catalog (bc-bot ships dist/ with .d.ts).
-// Used to validate item/pose names and to power the listItems / listPoses
+// Used to validate item/pose names and to power the listItems / listClothing / listPoses
 // discovery tools, so the LLM can pick valid names without us dumping the
 // whole 1.7MB catalog into the prompt.
 import {
@@ -37,10 +37,51 @@ interface CatalogGroup {
     Category?: string;
     Clothing?: boolean;
     AllowNone?: boolean;
-    Asset?: (string | { Name: string; [k: string]: unknown })[];
+    Asset?: (
+        | string
+        | { Name: string; Fetish?: string[]; [k: string]: unknown }
+    )[];
 }
 
 const CATALOG = AssetFemale3DCG as unknown as CatalogGroup[];
+
+/** Item (restraint/BDSM) group names, derived from the catalog. */
+const ITEM_GROUPS = CATALOG.filter((g) => g.Category === "Item").map(
+    (g) => g.Group,
+);
+
+/** Clothing group names, derived from the catalog (Clothing: true flag). */
+export const CLOTHING_GROUPS = CATALOG.filter(
+    (g) => g.Clothing === true,
+).map((g) => g.Group);
+
+/**
+ * All valid fetish tag names (mirrors the `FetishName` type from
+ * bc-stubs). Used to constrain the `fetish` filter param so the LLM
+ * can't hallucinate a tag.
+ */
+const FETISH_NAMES = [
+    "Bondage",
+    "Gagged",
+    "Blindness",
+    "Deafness",
+    "Chastity",
+    "Exhibitionist",
+    "Masochism",
+    "Sadism",
+    "Rope",
+    "Latex",
+    "Leather",
+    "Metal",
+    "Tape",
+    "Nylon",
+    "Lingerie",
+    "Pet",
+    "Pony",
+    "ABDL",
+    "Forniphilia",
+    "Spandex",
+];
 
 /**
  * A single tool the LLM may invoke. `definition` is the OpenAI/llama-server
@@ -227,12 +268,19 @@ export function buildTools(): Tool[] {
         name: "listItems",
         definition: def(
             "listItems",
-            "List available items (group + asset names) so you can use valid names with addItem/removeItem. Optionally filter by category ('Item' for restraints, 'Appearance' for clothing/body) or by a search term.",
+            "List available items (restraints and BDSM gear: gags, cuffs, hoods, devices, etc.) as 'group:asset' names so you can use valid names with addItem/removeItem. Optionally filter by group, fetish tag, or a search term.",
             {
-                category: {
+                group: {
                     type: "string",
-                    enum: ["Item", "Appearance"],
-                    description: "Filter by category",
+                    enum: ITEM_GROUPS,
+                    description:
+                        "Filter by asset group, e.g. 'ItemMouth', 'ItemNeck', 'ItemArms'",
+                },
+                fetish: {
+                    type: "string",
+                    enum: FETISH_NAMES,
+                    description:
+                        "Only show assets tagged with this fetish, e.g. 'Latex', 'Rope', 'Pet'",
                 },
                 search: {
                     type: "string",
@@ -246,7 +294,8 @@ export function buildTools(): Tool[] {
             },
         ),
         handler: (args) => {
-            const category = args.category as string | undefined;
+            const group = args.group as string | undefined;
+            const fetish = args.fetish as string | undefined;
             const search = (args.search as string | undefined)?.toLowerCase();
             const limit = Math.min(
                 Number(args.limit ?? 40),
@@ -254,23 +303,98 @@ export function buildTools(): Tool[] {
             );
             const out: string[] = [];
             for (const grp of CATALOG) {
-                if (category && grp.Category !== category) continue;
+                if (grp.Category !== "Item") continue;
+                if (group && grp.Group !== group) continue;
                 for (const a of grp.Asset ?? []) {
                     const name = typeof a === "string" ? a : a.Name;
+                    const tags =
+                        typeof a === "string" ? undefined : a.Fetish;
+                    if (fetish && !tags?.includes(fetish)) continue;
                     if (
                         search &&
                         !grp.Group.toLowerCase().includes(search) &&
                         !name.toLowerCase().includes(search)
                     )
                         continue;
-                    out.push(`${grp.Group}:${name}`);
+                    out.push(
+                        tags?.length
+                            ? `${grp.Group}:${name} [${tags.join(", ")}]`
+                            : `${grp.Group}:${name}`,
+                    );
                     if (out.length >= limit) break;
                 }
                 if (out.length >= limit) break;
             }
             if (out.length === 0)
-                return "No items matched. Try a different search term or category.";
+                return "No items matched. Try a different group, fetish, or search term.";
             return `${out.length} items:\n${out.join("\n")}`;
+        },
+    });
+
+    tools.push({
+        name: "listClothing",
+        definition: def(
+            "listClothing",
+            "List available clothing and body appearance groups (suits, bras, panties, shoes, hair, etc.) as 'group:asset' names so you can use valid names with addItem/removeItem. Optionally filter by group, fetish tag, or a search term.",
+            {
+                group: {
+                    type: "string",
+                    enum: CLOTHING_GROUPS,
+                    description:
+                        "Filter by asset group, e.g. 'Cloth', 'Suit', 'Bra', 'Panties', 'Shoes'",
+                },
+                fetish: {
+                    type: "string",
+                    enum: FETISH_NAMES,
+                    description:
+                        "Only show assets tagged with this fetish, e.g. 'Latex', 'Lingerie', 'Nylon'",
+                },
+                search: {
+                    type: "string",
+                    description:
+                        "Case-insensitive substring to match against group or asset names",
+                },
+                limit: {
+                    type: "number",
+                    description: "Max results to return (default 40)",
+                },
+            },
+        ),
+        handler: (args) => {
+            const group = args.group as string | undefined;
+            const fetish = args.fetish as string | undefined;
+            const search = (args.search as string | undefined)?.toLowerCase();
+            const limit = Math.min(
+                Number(args.limit ?? 40),
+                100,
+            );
+            const out: string[] = [];
+            for (const grp of CATALOG) {
+                if (grp.Clothing !== true) continue;
+                if (group && grp.Group !== group) continue;
+                for (const a of grp.Asset ?? []) {
+                    const name = typeof a === "string" ? a : a.Name;
+                    const tags =
+                        typeof a === "string" ? undefined : a.Fetish;
+                    if (fetish && !tags?.includes(fetish)) continue;
+                    if (
+                        search &&
+                        !grp.Group.toLowerCase().includes(search) &&
+                        !name.toLowerCase().includes(search)
+                    )
+                        continue;
+                    out.push(
+                        tags?.length
+                            ? `${grp.Group}:${name} [${tags.join(", ")}]`
+                            : `${grp.Group}:${name}`,
+                    );
+                    if (out.length >= limit) break;
+                }
+                if (out.length >= limit) break;
+            }
+            if (out.length === 0)
+                return "No clothing matched. Try a different group, fetish, or search term.";
+            return `${out.length} clothing items:\n${out.join("\n")}`;
         },
     });
 
@@ -296,7 +420,7 @@ export function buildTools(): Tool[] {
         name: "addItem",
         definition: def(
             "addItem",
-            "Add an item (restraint, clothing, etc.) to a character. Use listItems to find valid group/asset names. Restraints are applied one-by-one with pacing to avoid anti-cheat.",
+            "Add an item (restraint, clothing, etc.) to a character. Use listItems (restraints/BDSM) or listClothing (clothing/body) to find valid group/asset names. Restraints are applied one-by-one with pacing to avoid anti-cheat.",
             {
                 memberNumber: {
                     type: "number",
@@ -323,7 +447,7 @@ export function buildTools(): Tool[] {
                 return "Refused: that character is protected or suspended.";
             const grp = validateAsset(group, asset);
             if (!grp)
-                return `Error: '${group}:${asset}' is not a valid item. Use listItems to find valid names.`;
+                return `Error: '${group}:${asset}' is not a valid item. Use listItems or listClothing to find valid names.`;
 
             const limited = checkRateLimit(ctx, memberNumber);
             if (limited) return limited;
@@ -350,7 +474,7 @@ export function buildTools(): Tool[] {
         name: "removeItem",
         definition: def(
             "removeItem",
-            "Remove an item from a character by group. Use listItems to find valid group names.",
+            "Remove an item from a character by group. Use listItems (restraints/BDSM) or listClothing (clothing/body) to find valid group names.",
             {
                 memberNumber: {
                     type: "number",

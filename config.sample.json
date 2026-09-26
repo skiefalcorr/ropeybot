@@ -27,7 +27,8 @@
         "deniedTools": [],
         "_availableTools": {
             "sendMessage": "Send a message to the room or a specific character (Chat / Emote / Activity / Whisper).",
-            "listItems": "List available items (group + asset names), optionally filtered by category or search term.",
+            "listItems": "List available items (restraints/BDSM gear) as group:asset names, optionally filtered by group, fetish tag, or search term.",
+            "listClothing": "List available clothing/body appearance groups as group:asset names, optionally filtered by group, fetish tag, or search term.",
             "listPoses": "List all valid pose names.",
             "addItem": "Add an item (restraint, clothing, etc.) to a character. Restraints are paced to avoid anti-cheat.",
             "removeItem": "Remove an item from a character by group.",

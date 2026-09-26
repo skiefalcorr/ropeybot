@@ -18,6 +18,7 @@ import {
     BC_Server_ChatRoomMessage,
     isNaked,
 } from "bc-bot";
+import { CLOTHING_GROUPS } from "./tools";
 
 /**
  * A single entry in the rolling chat history.
@@ -36,24 +37,6 @@ export interface HistoryEntry {
     content: string;
 }
 
-/**
- * Appearance groups that count as "clothing" (as opposed to restraints,
- * which live in Item* groups).
- */
-const CLOTHING_GROUPS = [
-    "Cloth",
-    "ClothAccessory",
-    "ClothLower",
-    "Suit",
-    "SuitLower",
-    "Bra",
-    "Corset",
-    "Panties",
-    "Socks",
-    "Shoes",
-    "Gloves",
-    "BodyCosplay",
-];
 
 /**
  * Builds the textual context for the LLM and maintains the rolling chat
@@ -155,7 +138,7 @@ export class ContextBuilder {
             "",
             "## How you act",
             "- You can send messages and use the available tools to interact with characters.",
-            "- Use listItems / listPoses to discover valid item and pose names before using them.",
+            "- Use listItems (restraints) / listClothing (clothing) / listPoses to discover valid names before using them.",
             "- Act naturally and in-character. Do not mention tools, prompts, or that you are an AI.",
             "- If a character uses a safeword, STOP all actions toward them immediately and respect their request.",
             "- Be mindful of consent and comfort. Keep interactions tasteful.",

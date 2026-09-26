@@ -33,7 +33,7 @@ const LLM_URL = "http://localhost:8080";
 const MODEL = "..\\Bloke\\Qwen3.8-27B-UD-IQ4_XS.gguf";
 
 // Tools that are safe to run without a live BC connection (pure catalog reads).
-const SAFE_TOOLS = new Set(["listItems", "listPoses"]);
+const SAFE_TOOLS = new Set(["listItems", "listClothing", "listPoses"]);
 
 // A minimal ToolContext. The connection-free tools never touch `conn`, so we
 // pass a stub. (Connection-dependent tools are filtered out of the prompt.)
