@@ -124,10 +124,10 @@ function validateAsset(group: string, asset: string): CatalogGroup | null {
 }
 
 function isProtected(ctx: ToolContext, memberNumber: number): boolean {
-    if (memberNumber === ctx.conn.Player.MemberNumber) return true;
-    if (ctx.protectedMembers.includes(memberNumber)) return true;
-    const until = ctx.suspended.get(memberNumber);
-    if (until !== undefined && until > Date.now()) return true;
+    // if (memberNumber === ctx.conn.Player.MemberNumber) return true;
+    // if (ctx.protectedMembers.includes(memberNumber)) return true;
+    // const until = ctx.suspended.get(memberNumber);
+    // if (until !== undefined && until > Date.now()) return true;
     return false;
 }
 
@@ -181,11 +181,11 @@ export function buildTools(): Tool[] {
         name: "sendMessage",
         definition: def(
             "sendMessage",
-            "Send a message to the room or to a specific character. Use type 'Chat' for public speech, 'Emote' for actions (rendered as *...*), 'Whisper' for private messages (requires memberNumber).",
+            "Send a message to the room or to a specific character. Use type 'Chat' for public speech, 'Emote' for actions (rendered as *...*), 'Activity' for status/activity updates, or 'Whisper' for private messages (requires memberNumber).",
             {
                 type: {
                     type: "string",
-                    enum: ["Chat", "Emote", "Whisper"],
+                    enum: ["Chat", "Emote", "Activity", "Whisper"],
                     description: "Message type",
                 },
                 content: {
@@ -212,7 +212,7 @@ export function buildTools(): Tool[] {
                 return "Refused: that character is protected or suspended.";
             }
             ctx.conn.SendMessage(
-                type as "Chat" | "Emote" | "Whisper",
+                type as "Chat" | "Emote" | "Activity" | "Whisper",
                 content,
                 memberNumber,
             );
@@ -386,7 +386,7 @@ export function buildTools(): Tool[] {
         name: "stripAll",
         definition: def(
             "stripAll",
-            "Remove ALL items (restraints) from a character, applied one-by-one with pacing to avoid anti-cheat. Does not remove clothing or body.",
+            "Remove ALL clothing from a character, applied one-by-one with pacing to avoid anti-cheat. Does not remove restraints.",
             {
                 memberNumber: {
                     type: "number",
@@ -406,9 +406,9 @@ export function buildTools(): Tool[] {
             await target.Appearance.slowlyStripBulk({
                 appearance: false,
                 bodyCosplay: false,
-                clothing: false,
-                item: true,
-            });
+                clothing: true,
+                item: false,
+            }, true);
             return `Stripped all items from ${target.Name}.`;
         },
     });

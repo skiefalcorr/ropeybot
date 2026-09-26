@@ -26,7 +26,7 @@
         "allowedTools": [],
         "deniedTools": [],
         "_availableTools": {
-            "sendMessage": "Send a message to the room or a specific character (Chat / Emote / Whisper).",
+            "sendMessage": "Send a message to the room or a specific character (Chat / Emote / Activity / Whisper).",
             "listItems": "List available items (group + asset names), optionally filtered by category or search term.",
             "listPoses": "List all valid pose names.",
             "addItem": "Add an item (restraint, clothing, etc.) to a character. Restraints are paced to avoid anti-cheat.",
@@ -40,6 +40,7 @@
         "maxToolIterations": 5,
         "debounceMs": 1500,
         "historyLength": 40,
+        "bioLength": 200,
         "temperature": 0.8,
         "maxTokens": 512,
         "timeoutMs": 120000,

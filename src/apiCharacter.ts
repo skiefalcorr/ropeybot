@@ -133,6 +133,9 @@ export class API_Character {
     public get NickName(): string {
         return this.data.Nickname;
     }
+    public get Description(): string {
+        return this.data.Description;
+    }
     public get Appearance(): AppearanceType {
         return this._appearance;
     }

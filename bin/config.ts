@@ -43,6 +43,8 @@ export interface LLMConfig {
     debounceMs?: number;
     /** Max chat-history messages kept in context. @default 40 */
     historyLength?: number;
+    /** Max characters of a character's bio (Description) shown in room state. 0 hides bios. @default 200 */
+    bioLength?: number;
     /** Sampling temperature. @default 0.8 */
     temperature?: number;
     /** Max tokens per completion. @default 512 */

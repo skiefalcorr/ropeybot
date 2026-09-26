@@ -77,6 +77,7 @@ export class LLMAgent {
 
         this.contextBuilder = new ContextBuilder(
             config.historyLength ?? 40,
+            config.bioLength ?? 200,
         );
     }
 
@@ -141,15 +142,20 @@ export class LLMAgent {
         const room = this.conn.chatRoom;
         if (!room) return;
 
-        // Build the conversation: system prompt + history + new events.
+        // Build the conversation: static system prompt + history + a FRESH
+        // room-state snapshot at the end + new events. The snapshot is
+        // rebuilt on every turn so the model always sees the current state.
         const systemPrompt = this.contextBuilder.buildSystemPrompt(
             this.config.persona,
-            this.conn,
         );
 
         const messages: LLMMessage[] = [
             { role: "system", content: systemPrompt },
             ...this.contextBuilder.toMessages(),
+            {
+                role: "user",
+                content: this.contextBuilder.buildRoomStateMessage(this.conn),
+            },
         ];
 
         if (events.length > 0) {

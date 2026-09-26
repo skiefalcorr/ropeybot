@@ -37,13 +37,42 @@ export interface HistoryEntry {
 }
 
 /**
- * Builds the textual context (system prompt + room state) and maintains the
- * rolling chat history that is fed to the LLM.
+ * Appearance groups that count as "clothing" (as opposed to restraints,
+ * which live in Item* groups).
+ */
+const CLOTHING_GROUPS = [
+    "Cloth",
+    "ClothAccessory",
+    "ClothLower",
+    "Suit",
+    "SuitLower",
+    "Bra",
+    "Corset",
+    "Panties",
+    "Socks",
+    "Shoes",
+    "Gloves",
+    "BodyCosplay",
+];
+
+/**
+ * Builds the textual context for the LLM and maintains the rolling chat
+ * history.
+ *
+ * The system prompt is intentionally STATIC (persona + rules only) so that
+ * llama.cpp can reuse its KV cache across turns. The live room state is
+ * instead built fresh on every turn via {@link buildRoomStateMessage} and
+ * appended at the END of the conversation, right before the new-events
+ * prompt, so the model always sees the most up-to-date picture of who is
+ * wearing what.
  */
 export class ContextBuilder {
     private history: HistoryEntry[] = [];
 
-    constructor(private maxHistory: number = 40) {}
+    constructor(
+        private maxHistory: number = 40,
+        private bioLength: number = 2000,
+    ) {}
 
     /**
      * Record a message from another character into the history.
@@ -65,6 +94,11 @@ export class ContextBuilder {
 
     /**
      * Record a message the bot itself sent into the history.
+     *
+     * Takes the message type and content directly (rather than a full
+     * BC_Server_ChatRoomMessage) so the bot can record any message type it
+     * sends — Chat, Emote, Whisper, etc. — as it gains the ability to send
+     * them.
      */
     recordOutgoing(type: string, content: string): void {
         this.history.push({
@@ -112,71 +146,99 @@ export class ContextBuilder {
     }
 
     /**
-     * Build a compact description of the current room state for the system
-     * prompt.
+     * Build the STATIC system prompt: persona + rules. It contains no
+     * volatile room state so it stays identical across turns.
      */
-    buildRoomState(conn: API_Connector): string {
+    buildSystemPrompt(persona: string): string {
+        return [
+            persona,
+            "",
+            "## How you act",
+            "- You can send messages and use the available tools to interact with characters.",
+            "- Use listItems / listPoses to discover valid item and pose names before using them.",
+            "- Act naturally and in-character. Do not mention tools, prompts, or that you are an AI.",
+            "- If a character uses a safeword, STOP all actions toward them immediately and respect their request.",
+            "- Be mindful of consent and comfort. Keep interactions tasteful.",
+            "- A fresh 'Current room state' snapshot is provided at the end of the conversation. Trust it over anything you remember.",
+        ].join("\n");
+    }
+
+    /**
+     * Build a FRESH snapshot of the current room state. Call this on every
+     * turn and append it at the end of the message list so the model knows
+     * who is present, what they are wearing, and their bios.
+     */
+    buildRoomStateMessage(conn: API_Connector): string {
         const room = conn.chatRoom;
         if (!room) return "(no room)";
 
         const lines: string[] = [];
+        lines.push("Current room state (fresh snapshot):");
         lines.push(`Room: ${room.Name}`);
 
         const me = conn.Player;
         lines.push(
-            `You are ${me.Name} (member #${me.MemberNumber}).`,
+            `You are ${describeCharacter(me, this.bioLength)}.`,
         );
 
         for (const char of room.characters) {
             if (char.MemberNumber === me.MemberNumber) continue;
-            lines.push(describeCharacter(char));
+            lines.push(describeCharacter(char, this.bioLength));
         }
 
         return lines.join("\n");
     }
+}
 
-    /**
-     * Build the full system prompt: persona + rules + room state.
-     */
-    buildSystemPrompt(persona: string, conn: API_Connector): string {
-        const parts: string[] = [];
-        parts.push(persona);
-        parts.push(
-            [
-                "",
-                "## How you act",
-                "- You can send messages and use the available tools to interact with characters.",
-                "- Use listItems / listPoses to discover valid item and pose names before using them.",
-                "- Act naturally and in-character. Do not mention tools, prompts, or that you are an AI.",
-                "- If a character uses a safeword, STOP all actions toward them immediately and respect their request.",
-                "- Be mindful of consent and comfort. Keep interactions tasteful.",
-            ].join("\n"),
-        );
-        parts.push(
-            [
-                "",
-                "## Current room state",
-                this.buildRoomState(conn),
-            ].join("\n"),
-        );
-        return parts.join("\n");
-    }
+/**
+ * Derive a gender label from the character's body style. Returns undefined
+ * when the body items are unknown.
+ */
+function genderLabel(char: API_Character): string | undefined {
+    const upper = char.upperBodyStyle();
+    const lower = char.lowerBodyStyle();
+    if (upper === "female" && lower === "female") return "female";
+    if (upper === "male" && lower === "male") return "male";
+    if (upper === "female" && lower === "male") return "futanari";
+    if (upper === "male" && lower === "female") return "femboy";
+    return undefined;
 }
 
 /**
  * Produce a one-line description of a character's current state.
  */
-export function describeCharacter(char: API_Character): string {
+export function describeCharacter(
+    char: API_Character,
+    bioLength: number = 2000,
+): string {
     const parts: string[] = [];
-    parts.push(`${char.Name} (member #${char.MemberNumber})`);
+    parts.push(`${char.NickName} (member #${char.MemberNumber})`);
+
+    const gender = genderLabel(char);
+    if (gender) parts.push(gender);
+
+    const bio = char.Description?.trim() ?? "";
+    if (bio && bioLength > 0) {
+        parts.push(
+            `bio: ${bio.length > bioLength ? bio.slice(0, bioLength) + "…" : bio}`,
+        );
+    }
 
     const pose = char.Pose.map((p) => p.Name).join(", ");
     if (pose) parts.push(`pose: ${pose}`);
 
     const items = char.Appearance.allItems()
         .filter((i) => i.Group.startsWith("Item"))
-        .map((i) => `${i.Group}:${i.Name}`);
+        .map((i) => i.Name);
     if (items.length > 0) parts.push(`items: ${items.join(", ")}`);
+
+    const wearing = CLOTHING_GROUPS.filter((g) =>
+        char.Appearance.InventoryGet(g as never),
+    ).map((g) => {
+        const item = char.Appearance.InventoryGet(g as never);
+        return item ? `${g}:${item.Name}` : g;
+    });
+    if (wearing.length > 0) parts.push(`wearing: ${wearing.join(", ")}`);
 
     if (isNaked(char)) parts.push("naked");
     if (char.IsRestrained()) parts.push("restrained");
