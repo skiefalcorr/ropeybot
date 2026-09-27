@@ -143,7 +143,7 @@ export class API_Character {
         return this.data.MemberNumber;
     }
     public get Pose(): PoseObject[] {
-        return this.data.ActivePose.map((p) => {
+        return (this.data.ActivePose ?? []).map((p) => {
             return { Name: p };
         });
     }

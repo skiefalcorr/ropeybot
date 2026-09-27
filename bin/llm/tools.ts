@@ -722,6 +722,21 @@ export function buildTools(): Tool[] {
     });
 
     // ------------------------------------------------------------------
+    // Turn control
+    // ------------------------------------------------------------------
+    tools.push({
+        name: "endTurn",
+        definition: def(
+            "endTurn",
+            "Signal that you are done with all actions for this turn. Call this when you have finished everything you wanted to do.",
+            {},
+        ),
+        handler: () => {
+            return "Turn ended.";
+        },
+    });
+
+    // ------------------------------------------------------------------
     // Leash
     // ------------------------------------------------------------------
     tools.push({

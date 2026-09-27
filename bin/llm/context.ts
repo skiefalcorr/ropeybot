@@ -170,6 +170,7 @@ export class ContextBuilder {
             //"- If a character uses a safeword, STOP all actions toward them immediately and respect their request.",
             //"- Be mindful of consent and comfort. Keep interactions tasteful.",
             "- A fresh 'Current room state' snapshot is provided at the end of the conversation. Trust it over anything you remember.",
+            "- When you have finished all actions you want to take this turn, call endTurn tool.",
         ].join("\n");
     }
 

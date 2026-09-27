@@ -248,6 +248,7 @@ export class LLMAgent {
             });
 
             // Execute each tool call and append the results.
+            let endTurnRequested = false;
             for (const call of result.toolCalls) {
                 const name = call.function.name;
                 const tool = this.toolMap.get(name);
@@ -277,12 +278,21 @@ export class LLMAgent {
                     );
                 }
 
+                if (name === "endTurn") {
+                    endTurnRequested = true;
+                }
+
                 messages.push({
                     role: "tool",
                     tool_call_id: call.id,
                     name,
                     content: resultText,
                 });
+            }
+
+            // If the model called endTurn, stop the loop.
+            if (endTurnRequested) {
+                return;
             }
         }
 
