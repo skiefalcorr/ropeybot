@@ -40,6 +40,7 @@
         },
         "maxToolIterations": 5,
         "debounceMs": 1500,
+        "debounceMaxWaitMs": 5000,
         "historyLength": 40,
         "bioLength": 200,
         "temperature": 0.8,

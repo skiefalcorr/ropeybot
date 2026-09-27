@@ -137,6 +137,11 @@ export class LLMGame extends LogicBase {
         const me = connection.Player;
         // Ignore events about the bot itself (we already know what we did).
         if (event.character.MemberNumber === me.MemberNumber) return;
+        // Ignore events the bot itself caused (e.g. an item it applied on
+        // another character): the server syncs the target's appearance back
+        // with source = bot, and reacting to our own action would trigger an
+        // extra turn.
+        if (event.source?.MemberNumber === me.MemberNumber) return;
 
         const who = event.character.Name;
         const by = event.source ? ` by ${event.source.Name}` : "";

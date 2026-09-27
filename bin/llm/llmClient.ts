@@ -84,7 +84,7 @@ export class LLMClient {
     constructor(
         private baseUrl: string,
         private apiKey?: string,
-        private timeoutMs: number = 120_000,
+        private timeoutMs: number = 300_000,
     ) {
         // Normalize: strip trailing slash, ensure we hit the /v1 endpoint.
         this.baseUrl = baseUrl.replace(/\/+$/, "");

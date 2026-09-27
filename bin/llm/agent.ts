@@ -47,6 +47,8 @@ export class LLMAgent {
 
     private pendingEvents: string[] = [];
     private debounceTimer: NodeJS.Timeout | undefined;
+    /** Wall-clock time the current debounce window started (0 = none). */
+    private debounceStartedAt = 0;
     private running = false;
     private stopped = false;
 
@@ -90,7 +92,9 @@ export class LLMAgent {
 
     /**
      * Feed an event into the agent. Events are coalesced; a turn is triggered
-     * after the debounce window elapses with no new events.
+     * after the debounce window elapses with no new events, but no later than
+     * `debounceMaxWaitMs` after the first pending event (so a continuous
+     * stream of events can't starve a turn indefinitely).
      */
     onEvent(description: string): void {
         if (this.stopped) return;
@@ -113,10 +117,26 @@ export class LLMAgent {
     }
 
     private scheduleTurn(): void {
-        if (this.debounceTimer) return;
-        const delay = this.config.debounceMs ?? 1500;
+        const now = Date.now();
+        if (this.debounceTimer) {
+            // True debounce: every new event restarts the quiet window.
+            clearTimeout(this.debounceTimer);
+        }
+        if (this.debounceStartedAt === 0) {
+            this.debounceStartedAt = now;
+        }
+
+        const debounceMs = this.config.debounceMs ?? 1500;
+        const maxWaitMs = this.config.debounceMaxWaitMs ?? 5000;
+
+        // Starvation guard: fire no later than maxWaitMs after the first
+        // pending event, even if events keep arriving.
+        const remainingMaxWait = maxWaitMs - (now - this.debounceStartedAt);
+        const delay = Math.max(0, Math.min(debounceMs, remainingMaxWait));
+
         this.debounceTimer = setTimeout(() => {
             this.debounceTimer = undefined;
+            this.debounceStartedAt = 0;
             void this.runTurn();
         }, delay);
     }
@@ -167,15 +187,16 @@ export class LLMAgent {
 
         if (events.length > 0) {
             messages.push({
-                role: "user",
+                role: "system",
                 content:
                     "New events in the room:\n" +
                     events.join("\n") +
                     "\n\nRespond in character. Use tools for everything. But you can write OOC messages in parentheses (Like this) if you want.",
             });
-        } else {
+        }
+        else {
             messages.push({
-                role: "user",
+                role: "system",
                 content:
                     "Continue the roleplay. Act if something feels appropriate, or stay silent.",
             });
@@ -320,6 +341,7 @@ export class LLMAgent {
             clearTimeout(this.debounceTimer);
             this.debounceTimer = undefined;
         }
+        this.debounceStartedAt = 0;
         this.logger?.close();
     }
 }

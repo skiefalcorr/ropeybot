@@ -41,6 +41,12 @@ export interface LLMConfig {
     maxToolIterations?: number;
     /** Debounce window (ms) before an LLM turn is triggered after events. @default 1500 */
     debounceMs?: number;
+    /**
+     * Max time (ms) to wait for the first pending event before a turn fires,
+     * even if events keep arriving. Prevents a continuous event stream from
+     * starving the debounce window indefinitely. @default 5000
+     */
+    debounceMaxWaitMs?: number;
     /** Max chat-history messages kept in context. @default 40 */
     historyLength?: number;
     /** Max characters of a character's bio (Description) shown in room state. 0 hides bios. @default 200 */
