@@ -77,6 +77,7 @@ export class LLMAgent {
             suspended: new Map(),
             actionTimestamps: [],
             lastActionByTarget: new Map(),
+            leashed: new Map(),
         };
 
         this.contextBuilder = new ContextBuilder(
@@ -187,7 +188,7 @@ export class LLMAgent {
 
         if (events.length > 0) {
             messages.push({
-                role: "system",
+                role: "user",
                 content:
                     "New events in the room:\n" +
                     events.join("\n") +
@@ -196,7 +197,7 @@ export class LLMAgent {
         }
         else {
             messages.push({
-                role: "system",
+                role: "user",
                 content:
                     "Continue the roleplay. Act if something feels appropriate, or stay silent.",
             });
@@ -335,6 +336,16 @@ export class LLMAgent {
     /**
      * Stop the agent (clear timers, mark stopped).
      */
+    /**
+     * Release the leash on a character (e.g. when they leave the room).
+     * No-op if the bot is not holding their leash.
+     */
+    releaseLeash(memberNumber: number): void {
+        if (!this.ctx.leashed.has(memberNumber)) return;
+        this.conn.SendMessage("Hidden", "StopHoldLeash", memberNumber);
+        this.ctx.leashed.delete(memberNumber);
+    }
+
     stop(): void {
         this.stopped = true;
         if (this.debounceTimer) {

@@ -593,6 +593,8 @@ export class API_Connector extends EventEmitter<ConnectorEvents> {
             console.log("chat room message", msg);
         }
 
+        //console.log("chat room message", msg);
+
         if (!msg.Sender) return;
         const char = this._chatRoom?.getCharacter(msg.Sender);
         if (!char) return;

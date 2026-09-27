@@ -125,6 +125,9 @@ export class LLMGame extends LogicBase {
         intentional: boolean,
     ): void {
         if (character.MemberNumber === connection.Player.MemberNumber) return;
+        // Drop the leash on a character who left (the server clears the
+        // leash too, but we must not keep stale state).
+        this.agent.releaseLeash(character.MemberNumber);
         this.agent.onEvent(
             `${character.Name} left the room${intentional ? "" : " (kicked)"}.`,
         );

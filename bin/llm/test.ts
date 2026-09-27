@@ -44,6 +44,7 @@ const stubCtx: ToolContext = {
     suspended: new Map(),
     actionTimestamps: [],
     lastActionByTarget: new Map(),
+    leashed: new Map(),
 };
 
 function onlySafe(tools: Tool[]): Tool[] {
