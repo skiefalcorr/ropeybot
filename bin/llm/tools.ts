@@ -39,8 +39,7 @@ interface CatalogGroup {
     Clothing?: boolean;
     AllowNone?: boolean;
     Asset?: (
-        | string
-        | { Name: string; Fetish?: string[]; [k: string]: unknown }
+        string | { Name: string; Fetish?: string[]; [k: string]: unknown }
     )[];
 }
 
@@ -52,9 +51,9 @@ const ITEM_GROUPS = CATALOG.filter((g) => g.Category === "Item").map(
 );
 
 /** Clothing group names, derived from the catalog (Clothing: true flag). */
-export const CLOTHING_GROUPS = CATALOG.filter(
-    (g) => g.Clothing === true,
-).map((g) => g.Group);
+export const CLOTHING_GROUPS = CATALOG.filter((g) => g.Clothing === true).map(
+    (g) => g.Group,
+);
 
 /**
  * All valid fetish tag names (mirrors the `FetishName` type from
@@ -111,6 +110,8 @@ export interface ToolContext {
     lastActionByTarget: Map<number, number>;
     /** Member numbers the bot is currently holding on a leash. */
     leashed: Map<number, number>;
+    /** Member numbers that are active participants (opted in via /bot start). */
+    participants: Set<number>;
 }
 
 function def(
@@ -173,6 +174,21 @@ function isProtected(ctx: ToolContext, memberNumber: number): boolean {
     // const until = ctx.suspended.get(memberNumber);
     // if (until !== undefined && until > Date.now()) return true;
     return false;
+}
+
+/**
+ * Participation gate. Returns null if the target is an active participant
+ * (or is the bot itself), or an error string explaining the refusal.
+ */
+function requireParticipant(
+    ctx: ToolContext,
+    memberNumber: number,
+): string | null {
+    if (memberNumber === ctx.conn.Player.MemberNumber) return null;
+    if (!ctx.participants.has(memberNumber)) {
+        return "Refused: that character is not participating. They must use /bot start first.";
+    }
+    return null;
 }
 
 /**
@@ -255,6 +271,10 @@ export function buildTools(): Tool[] {
             if (type === "Whisper" && isProtected(ctx, memberNumber!)) {
                 return "Refused: that character is protected or suspended.";
             }
+            if (type === "Whisper") {
+                const refused = requireParticipant(ctx, memberNumber!);
+                if (refused) return refused;
+            }
             ctx.conn.SendMessage(
                 type as "Chat" | "Emote" | "Activity" | "Whisper",
                 content,
@@ -300,18 +320,14 @@ export function buildTools(): Tool[] {
             const group = args.group as string | undefined;
             const fetish = args.fetish as string | undefined;
             const search = (args.search as string | undefined)?.toLowerCase();
-            const limit = Math.min(
-                Number(args.limit ?? 100),
-                200,
-            );
+            const limit = Math.min(Number(args.limit ?? 100), 200);
             const out: string[] = [];
             for (const grp of CATALOG) {
                 if (grp.Category !== "Item") continue;
                 if (group && grp.Group !== group) continue;
                 for (const a of grp.Asset ?? []) {
                     const name = typeof a === "string" ? a : a.Name;
-                    const tags =
-                        typeof a === "string" ? undefined : a.Fetish;
+                    const tags = typeof a === "string" ? undefined : a.Fetish;
                     if (fetish && !tags?.includes(fetish)) continue;
                     if (
                         search &&
@@ -367,18 +383,14 @@ export function buildTools(): Tool[] {
             const group = args.group as string | undefined;
             const fetish = args.fetish as string | undefined;
             const search = (args.search as string | undefined)?.toLowerCase();
-            const limit = Math.min(
-                Number(args.limit ?? 40),
-                100,
-            );
+            const limit = Math.min(Number(args.limit ?? 40), 100);
             const out: string[] = [];
             for (const grp of CATALOG) {
                 if (grp.Clothing !== true) continue;
                 if (group && grp.Group !== group) continue;
                 for (const a of grp.Asset ?? []) {
                     const name = typeof a === "string" ? a : a.Name;
-                    const tags =
-                        typeof a === "string" ? undefined : a.Fetish;
+                    const tags = typeof a === "string" ? undefined : a.Fetish;
                     if (fetish && !tags?.includes(fetish)) continue;
                     if (
                         search &&
@@ -423,7 +435,7 @@ export function buildTools(): Tool[] {
         name: "addItem",
         definition: def(
             "addItem",
-            "Add an item (restraint, clothing, etc.) to a character. Use listItems (restraints/BDSM) or listClothing (clothing/body) to find valid group/asset names. Restraints are applied one-by-one with pacing to avoid anti-cheat. The item is automatically colored: its first colorable layer takes the character's hair color and the second takes their eye color; pass color1/color2 to override. Optionally set a craft name/description so the item shows up as a named craft.",
+            "Add an item (restraint, clothing, etc.) to a character. Use listItems (restraints/BDSM) or listClothing (clothing/body) to find valid group/asset names. The item is automatically colored: its first colorable layer takes the character's hair color and the second takes their eye color; pass color1/color2 to override. Optionally set a craft name/description so the item shows up as a named craft.",
             {
                 memberNumber: {
                     type: "number",
@@ -454,8 +466,7 @@ export function buildTools(): Tool[] {
                 },
                 craftDescription: {
                     type: "string",
-                    description:
-                        "Optional craft description for the item.",
+                    description: "Optional craft description for the item.",
                 },
             },
             ["memberNumber", "group", "asset"],
@@ -468,12 +479,13 @@ export function buildTools(): Tool[] {
             const color2 = args.color2 as string | undefined;
             const craftName = args.craftName as string | undefined;
             const craftDescription = args.craftDescription as
-                | string
-                | undefined;
+                string | undefined;
             const target = findCharacter(ctx.conn, args);
             if (!target) return "Error: character not found in room.";
             if (isProtected(ctx, memberNumber))
                 return "Refused: that character is protected or suspended.";
+            const refused = requireParticipant(ctx, memberNumber);
+            if (refused) return refused;
             const grp = validateAsset(group, asset);
             if (!grp)
                 return `Error: '${group}:${asset}' is not a valid item. Use listItems or listClothing to find valid names.`;
@@ -481,10 +493,7 @@ export function buildTools(): Tool[] {
             const limited = checkRateLimit(ctx, memberNumber);
             if (limited) return limited;
 
-            const item: BC_AppearanceItem = AssetGet(
-                group as never,
-                asset,
-            );
+            const item: BC_AppearanceItem = AssetGet(group as never, asset);
             try {
                 if (isBind(item)) {
                     // Paced, anti-cheat-safe application.
@@ -495,12 +504,13 @@ export function buildTools(): Tool[] {
 
                 // Color the item after the character's hair/eyes (or the
                 // explicit overrides), then optionally mark it as a craft.
-                const applied = target.Appearance.InventoryGet(
-                    group as never,
-                );
+                const applied = target.Appearance.InventoryGet(group as never);
                 if (applied) {
                     applied.setColorFromCharacter(color1, color2);
-                    if (craftName !== undefined || craftDescription !== undefined) {
+                    if (
+                        craftName !== undefined ||
+                        craftDescription !== undefined
+                    ) {
                         applied.SetCraft({
                             Name: craftName ?? "",
                             Description: craftDescription ?? "",
@@ -539,11 +549,10 @@ export function buildTools(): Tool[] {
             if (!target) return "Error: character not found in room.";
             if (isProtected(ctx, memberNumber))
                 return "Refused: that character is protected or suspended.";
-            const existing = target.Appearance.InventoryGet(
-                group as never,
-            );
-            if (!existing)
-                return `Character has no item in group '${group}'.`;
+            const refused = requireParticipant(ctx, memberNumber);
+            if (refused) return refused;
+            const existing = target.Appearance.InventoryGet(group as never);
+            if (!existing) return `Character has no item in group '${group}'.`;
             const limited = checkRateLimit(ctx, memberNumber);
             if (limited) return limited;
             target.Appearance.RemoveItem(group as never);
@@ -570,14 +579,19 @@ export function buildTools(): Tool[] {
             if (!target) return "Error: character not found in room.";
             if (isProtected(ctx, memberNumber))
                 return "Refused: that character is protected or suspended.";
+            const refused = requireParticipant(ctx, memberNumber);
+            if (refused) return refused;
             const limited = checkRateLimit(ctx, memberNumber);
             if (limited) return limited;
-            await target.Appearance.slowlyStripBulk({
-                appearance: false,
-                bodyCosplay: false,
-                clothing: true,
-                item: false,
-            }, true);
+            await target.Appearance.slowlyStripBulk(
+                {
+                    appearance: false,
+                    bodyCosplay: false,
+                    clothing: true,
+                    item: false,
+                },
+                true,
+            );
             return `Stripped all items from ${target.Name}.`;
         },
     });
@@ -597,7 +611,7 @@ export function buildTools(): Tool[] {
                 },
                 poses: {
                     type: "array",
-                    description: "List of pose names, e.g. [\"Kneel\"]",
+                    description: 'List of pose names, e.g. ["Kneel"]',
                 },
             },
             ["memberNumber", "poses"],
@@ -615,6 +629,8 @@ export function buildTools(): Tool[] {
             if (!target) return "Error: character not found in room.";
             if (isProtected(ctx, memberNumber))
                 return "Refused: that character is protected or suspended.";
+            const refused = requireParticipant(ctx, memberNumber);
+            if (refused) return refused;
             const limited = checkRateLimit(ctx, memberNumber);
             if (limited) return limited;
             target.SetActivePose(poses as never);
@@ -652,6 +668,8 @@ export function buildTools(): Tool[] {
             if (!target) return "Error: character not found in room.";
             if (isProtected(ctx, memberNumber))
                 return "Refused: that character is protected or suspended.";
+            const refused = requireParticipant(ctx, memberNumber);
+            if (refused) return refused;
             const limited = checkRateLimit(ctx, memberNumber);
             if (limited) return limited;
             target.SetExpression(group as never, expression as never);
@@ -686,6 +704,8 @@ export function buildTools(): Tool[] {
             if (!target) return "Error: character not found in room.";
             if (isProtected(ctx, memberNumber))
                 return "Refused: that character is protected or suspended.";
+            const refused = requireParticipant(ctx, memberNumber);
+            if (refused) return refused;
             const item = target.Appearance.InventoryGet(group as never);
             if (!item) return `Character has no item in group '${group}'.`;
             const limited = checkRateLimit(ctx, memberNumber);
@@ -728,7 +748,7 @@ export function buildTools(): Tool[] {
         name: "endTurn",
         definition: def(
             "endTurn",
-            "Signal that you are done with all actions for this turn. Call this when you have finished everything you wanted to do.",
+            "Signal that you are done with all actions for this turn. Call this when you have finished everything you wanted to do. Do not call it in the same batch as lookup tools (listItems, listClothing, listPoses) — perform your action first, then call endTurn.",
             {},
         ),
         handler: () => {
@@ -765,19 +785,21 @@ export function buildTools(): Tool[] {
             if (!target) return "Error: character not found in room.";
             if (isProtected(ctx, memberNumber))
                 return "Refused: that character is protected or suspended.";
+            const refused = requireParticipant(ctx, memberNumber);
+            if (refused) return refused;
             const limited = checkRateLimit(ctx, memberNumber);
             if (limited) return limited;
 
             if (action === "hold") {
-                if (ctx.leashed.has(memberNumber))
-                    return `Already holding ${target.Name}'s leash.`;
+                //if (ctx.leashed.has(memberNumber))
+                //return `Already holding ${target.Name}'s leash.`;
                 ctx.conn.SendMessage("Hidden", "HoldLeash", memberNumber);
                 ctx.leashed.set(memberNumber, Date.now());
                 return `Holding ${target.Name}'s leash. They must now follow you.`;
             }
             if (action === "release") {
-                if (!ctx.leashed.has(memberNumber))
-                    return `Not holding ${target.Name}'s leash.`;
+                //if (!ctx.leashed.has(memberNumber))
+                //return `Not holding ${target.Name}'s leash.`;
                 ctx.conn.SendMessage("Hidden", "StopHoldLeash", memberNumber);
                 ctx.leashed.delete(memberNumber);
                 return `Released ${target.Name}'s leash.`;
@@ -793,10 +815,7 @@ export function buildTools(): Tool[] {
  * Resolve the set of tools the LLM is allowed to use, based on config
  * allowedTools / deniedTools.
  */
-export function resolveTools(
-    all: Tool[],
-    config: LLMConfig,
-): Tool[] {
+export function resolveTools(all: Tool[], config: LLMConfig): Tool[] {
     const denied = new Set(config.deniedTools ?? []);
     let tools = all.filter((t) => !denied.has(t.name));
     if (config.allowedTools && config.allowedTools.length > 0) {

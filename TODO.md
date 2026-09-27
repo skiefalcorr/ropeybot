@@ -1,0 +1,1 @@
+Add error to leash tool when there's nothing to hold on to.

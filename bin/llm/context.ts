@@ -64,7 +64,6 @@ export interface HistoryEntry {
     content: string;
 }
 
-
 /**
  * Builds the textual context for the LLM and maintains the rolling chat
  * history.
@@ -82,6 +81,7 @@ export class ContextBuilder {
     constructor(
         private maxHistory: number = 40,
         private bioLength: number = 2000,
+        private participants?: Set<number>,
     ) {}
 
     /**
@@ -165,12 +165,13 @@ export class ContextBuilder {
             "",
             "## How you act",
             "- You can use the available tools to interact with characters.",
-            "- Use listItems (for gear and restraints) / listClothing (for clothing) to discover valid names before using them.",
-            "- Act naturally and in-character. Do not mention tools, prompts, or that you are an AI.",
+            "- Use listItems (for gear and restraints) / listClothing (for clothing) to discover valid names before using them. Results are looped back into your context for this turn only.",
             //"- If a character uses a safeword, STOP all actions toward them immediately and respect their request.",
             //"- Be mindful of consent and comfort. Keep interactions tasteful.",
             "- A fresh 'Current room state' snapshot is provided at the end of the conversation. Trust it over anything you remember.",
-            "- When you have finished all actions you want to take this turn, call endTurn tool.",
+            "- Only interact with participating characters. Characters marked 'not participating' are not playing with you — ignore them.",
+            "- When you have finished all actions you want to take this turn, call endTurn tool. Results of other toolcalls are looped back to you in this turn. Don't chain endTurn with other tools, end your turn with a separate call to endTurn.",
+            "- Act naturally and in-character. Do not mention tools, prompts, or that you are an AI.",
         ].join("\n");
     }
 
@@ -188,14 +189,17 @@ export class ContextBuilder {
         lines.push(`Room: ${room.Name}`);
 
         const me = conn.Player;
-        lines.push(
-            `You are ${describeCharacter(me, this.bioLength)}.`,
-        );
+        lines.push(`You are ${describeCharacter(me, this.bioLength)}.`);
 
         for (const char of room.characters) {
             if (char.MemberNumber === me.MemberNumber) continue;
+            const participating =
+                !this.participants || this.participants.has(char.MemberNumber);
             lines.push("Next character:");
             lines.push(describeCharacter(char, this.bioLength));
+            if (!participating) {
+                lines.push("(not participating)");
+            }
         }
 
         return lines.join("\n");
@@ -224,7 +228,9 @@ export function describeCharacter(
     bioLength: number = 2000,
 ): string {
     const parts: string[] = [];
-    parts.push(`${char.NickName.length != 0? char.NickName : char.Name} (member #${char.MemberNumber})`);
+    parts.push(
+        `${char.NickName.length != 0 ? char.NickName : char.Name} (member #${char.MemberNumber})`,
+    );
 
     const gender = genderLabel(char);
     if (gender) parts.push(gender);

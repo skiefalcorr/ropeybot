@@ -45,6 +45,7 @@ const stubCtx: ToolContext = {
     actionTimestamps: [],
     lastActionByTarget: new Map(),
     leashed: new Map(),
+    participants: new Set(),
 };
 
 function onlySafe(tools: Tool[]): Tool[] {
@@ -56,7 +57,9 @@ async function main() {
     const allTools = buildTools();
     const tools = onlySafe(allTools);
 
-    console.log(`Loaded ${allTools.length} tools total; exposing ${tools.length} safe ones:`);
+    console.log(
+        `Loaded ${allTools.length} tools total; exposing ${tools.length} safe ones:`,
+    );
     console.log("  " + tools.map((t) => t.name).join(", "));
     console.log("");
 
@@ -142,7 +145,9 @@ async function main() {
         );
     }
 
-    console.log("\nTEST PASSED: LLM chat + native tool calling works end-to-end.");
+    console.log(
+        "\nTEST PASSED: LLM chat + native tool calling works end-to-end.",
+    );
 }
 
 main().catch((e) => {

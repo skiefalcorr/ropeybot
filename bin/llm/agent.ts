@@ -24,6 +24,13 @@ import { LLMLogger } from "./llmLogger";
 import { LLMConfig } from "../config";
 
 /**
+ * Read-only catalog lookup tools. Calling endTurn in the same batch as one of
+ * these is ignored, since the model typically still needs to act on the
+ * results it just looked up.
+ */
+const LOOKUP_TOOLS = ["listItems", "listClothing", "listPoses"];
+
+/**
  * The LLM agent. It ingests room events, coalesces them with a debounce
  * window, and runs a single-flight "turn" loop: ask the LLM, execute any
  * tool calls it requests, feed results back, repeat until it produces plain
@@ -78,11 +85,13 @@ export class LLMAgent {
             actionTimestamps: [],
             lastActionByTarget: new Map(),
             leashed: new Map(),
+            participants: new Set(),
         };
 
         this.contextBuilder = new ContextBuilder(
             config.historyLength ?? 40,
             config.bioLength ?? 200,
+            this.ctx.participants,
         );
 
         if (config.llmLog) {
@@ -112,9 +121,7 @@ export class LLMAgent {
         message: BC_Server_ChatRoomMessage,
     ): void {
         this.contextBuilder.recordIncoming(sender, message);
-        this.onEvent(
-            `[${sender.Name} ${message.Type}] ${message.Content}`,
-        );
+        this.onEvent(`[${sender.Name} ${message.Type}] ${message.Content}`);
     }
 
     private scheduleTurn(): void {
@@ -194,8 +201,7 @@ export class LLMAgent {
                     events.join("\n") +
                     "\n\nRespond in character. Use tools for everything. But you can write OOC messages in parentheses (Like this) if you want.",
             });
-        }
-        else {
+        } else {
             messages.push({
                 role: "user",
                 content:
@@ -248,6 +254,12 @@ export class LLMAgent {
             });
 
             // Execute each tool call and append the results.
+            // If endTurn is chained with a lookup tool (listItems etc.) in the
+            // same batch, ignore it and remind the model to act first.
+            const batchNames = new Set(
+                result.toolCalls.map((c) => c.function.name),
+            );
+            const hasLookup = LOOKUP_TOOLS.some((t) => batchNames.has(t));
             let endTurnRequested = false;
             for (const call of result.toolCalls) {
                 const name = call.function.name;
@@ -279,7 +291,13 @@ export class LLMAgent {
                 }
 
                 if (name === "endTurn") {
-                    endTurnRequested = true;
+                    if (hasLookup) {
+                        resultText =
+                            "endTurn ignored: you called a lookup tool (listItems/listClothing/listPoses) in this batch. Perform your intended action first, then call endTurn.";
+                        console.log(`  -> ${resultText}`);
+                    } else {
+                        endTurnRequested = true;
+                    }
                 }
 
                 messages.push({
@@ -306,17 +324,12 @@ export class LLMAgent {
      * suspend actions toward them, and notify them.
      * Returns true if a safeword was handled.
      */
-    handleSafeword(
-        sender: API_Character,
-        content: string,
-    ): boolean {
+    handleSafeword(sender: API_Character, content: string): boolean {
         const safewords = this.config.safewords ?? ["red"];
         if (safewords.length === 0) return false;
 
         const lower = content.toLowerCase();
-        const hit = safewords.find((w) =>
-            lower.includes(w.toLowerCase()),
-        );
+        const hit = safewords.find((w) => lower.includes(w.toLowerCase()));
         if (!hit) return false;
 
         console.log(`Safeword '${hit}' used by ${sender.Name}`);
@@ -354,6 +367,33 @@ export class LLMAgent {
         if (!this.ctx.leashed.has(memberNumber)) return;
         this.conn.SendMessage("Hidden", "StopHoldLeash", memberNumber);
         this.ctx.leashed.delete(memberNumber);
+    }
+
+    /**
+     * Add or remove a character from the participant set. Removing a
+     * participant also releases their leash if held.
+     */
+    setParticipant(memberNumber: number, participating: boolean): void {
+        if (participating) {
+            this.ctx.participants.add(memberNumber);
+        } else {
+            this.ctx.participants.delete(memberNumber);
+            this.releaseLeash(memberNumber);
+        }
+    }
+
+    /**
+     * Whether a character is currently an active participant.
+     */
+    isParticipant(memberNumber: number): boolean {
+        return this.ctx.participants.has(memberNumber);
+    }
+
+    /**
+     * Return the member numbers of all active participants.
+     */
+    getParticipants(): number[] {
+        return [...this.ctx.participants];
     }
 
     stop(): void {

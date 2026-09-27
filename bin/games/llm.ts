@@ -17,6 +17,7 @@ import {
     API_Character,
     AnyCharacterEvent,
     BC_Server_ChatRoomMessage,
+    CommandParser,
     LogicBase,
 } from "bc-bot";
 import { LLMConfig, ConfigFile } from "../config";
@@ -34,11 +35,13 @@ export class LLMGame extends LogicBase {
     public static description = [
         "An LLM-powered roleplay bot.",
         "It chats and interacts with characters in the room, using a local LLM to decide its actions.",
+        "Use !start to join, !stop to leave, !status to list participants.",
         "Say a safeword to make it stop and remove any items it placed on you.",
         "Code at https://github.com/FriendsOfBC/ropeybot",
     ].join("\n");
 
     private agent: LLMAgent;
+    private commandParser: CommandParser;
 
     constructor(
         private conn: API_Connector,
@@ -48,7 +51,53 @@ export class LLMGame extends LogicBase {
     ) {
         super();
         this.agent = new LLMAgent(conn, llmConfig, superusers);
+        this.commandParser = new CommandParser(conn);
+        this.commandParser.register("start", this.onCommandStart);
+        this.commandParser.register("stop", this.onCommandStop);
+        this.commandParser.register("status", this.onCommandStatus);
     }
+
+    private onCommandStart = (
+        sender: API_Character,
+        msg: BC_Server_ChatRoomMessage,
+    ): void => {
+        this.agent.setParticipant(sender.MemberNumber, true);
+        this.conn.reply(
+            msg,
+            `Welcome, ${sender.Name}! You are now a participant.`,
+        );
+    };
+
+    private onCommandStop = (
+        sender: API_Character,
+        msg: BC_Server_ChatRoomMessage,
+    ): void => {
+        this.agent.setParticipant(sender.MemberNumber, false);
+        this.conn.reply(
+            msg,
+            `You are no longer a participant. I will ignore you from now on.`,
+        );
+    };
+
+    private onCommandStatus = (
+        sender: API_Character,
+        msg: BC_Server_ChatRoomMessage,
+    ): void => {
+        const room = this.conn.chatRoom;
+        const names = this.agent
+            .getParticipants()
+            .map(
+                (n) =>
+                    room?.characters.find((c) => c.MemberNumber === n)?.Name ??
+                    String(n),
+            );
+        this.conn.reply(
+            msg,
+            names.length > 0
+                ? `Participants: ${names.join(", ")}`
+                : "No participants yet. Use !start to join.",
+        );
+    };
 
     /**
      * Self-setup: nickname, description, and optional starting pose.
@@ -97,13 +146,16 @@ export class LLMGame extends LogicBase {
         }
 
         // Ignore non-text message types.
-        if (message.Type !== "Chat" && message.Type !== "Emote") return;
+        if (message.Type !== "Chat" && message.Type !== "Emote" && message.Type !== "Whisper") return;
 
         // Safeword check first: if the sender used a safeword, handle it and
         // do NOT feed the raw message to the agent as a normal prompt.
         if (this.agent.handleSafeword(sender, message.Content)) {
             return;
         }
+
+        // Only participants' messages are fed to the agent.
+        if (!this.agent.isParticipant(sender.MemberNumber)) return;
 
         this.agent.onIncomingMessage(sender, message);
     }
@@ -113,6 +165,9 @@ export class LLMGame extends LogicBase {
         character: API_Character,
     ): Promise<void> {
         if (character.MemberNumber === connection.Player.MemberNumber) {
+            return Promise.resolve();
+        }
+        if (!this.agent.isParticipant(character.MemberNumber)) {
             return Promise.resolve();
         }
         this.agent.onEvent(`${character.Name} entered the room.`);
@@ -125,9 +180,12 @@ export class LLMGame extends LogicBase {
         intentional: boolean,
     ): void {
         if (character.MemberNumber === connection.Player.MemberNumber) return;
-        // Drop the leash on a character who left (the server clears the
-        // leash too, but we must not keep stale state).
-        this.agent.releaseLeash(character.MemberNumber);
+        // Was this character a participant? If so, tell the agent they left
+        // and remove them from the participant set (which also releases
+        // their leash if held).
+        const wasParticipant = this.agent.isParticipant(character.MemberNumber);
+        this.agent.setParticipant(character.MemberNumber, false);
+        if (!wasParticipant) return;
         this.agent.onEvent(
             `${character.Name} left the room${intentional ? "" : " (kicked)"}.`,
         );
@@ -145,6 +203,8 @@ export class LLMGame extends LogicBase {
         // with source = bot, and reacting to our own action would trigger an
         // extra turn.
         if (event.source?.MemberNumber === me.MemberNumber) return;
+        // Only react to events about participating characters.
+        if (!this.agent.isParticipant(event.character.MemberNumber)) return;
 
         const who = event.character.Name;
         const by = event.source ? ` by ${event.source.Name}` : "";
@@ -202,7 +262,8 @@ function extractActivityText(
     message: BC_Server_ChatRoomMessage,
     conn: API_Connector,
 ): string | undefined {
-    const dict = (message.Dictionary ?? []) as unknown as ActivityDictionaryEntry[];
+    const dict = (message.Dictionary ??
+        []) as unknown as ActivityDictionaryEntry[];
 
     // Preferred: the rendered sentence from the "MISSING TEXT" entry.
     for (const entry of dict) {
@@ -218,9 +279,8 @@ function extractActivityText(
     }
 
     // Fallback: reconstruct from ActivityName + character names.
-    const activityName = dict.find(
-        (e) => typeof e.ActivityName === "string",
-    )?.ActivityName as string | undefined;
+    const activityName = dict.find((e) => typeof e.ActivityName === "string")
+        ?.ActivityName as string | undefined;
     if (!activityName) return undefined;
 
     const source = dict.find((e) => e.SourceCharacter !== undefined)
