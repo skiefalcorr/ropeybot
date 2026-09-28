@@ -48,6 +48,12 @@ export interface LLMMessage {
     tool_call_id?: string;
     /** Present on tool-result messages: the tool name (for logging). */
     name?: string;
+    /**
+     * Present on assistant messages from thinking models (e.g. Qwen3).
+     * Must be echoed back on the same turn's iterations so the model keeps
+     * its chain-of-thought; never carried across turns.
+     */
+    reasoning_content?: string | null;
 }
 
 export interface LLMToolCall {
@@ -177,9 +183,7 @@ export class LLMClient {
         if (!raw || !raw.trim()) return {};
         try {
             const parsed = JSON.parse(raw);
-            return typeof parsed === "object" && parsed !== null
-                ? parsed
-                : {};
+            return typeof parsed === "object" && parsed !== null ? parsed : {};
         } catch {
             // Models occasionally emit trailing commas or unquoted strings.
             // Best-effort salvage: strip trailing commas.
@@ -190,7 +194,10 @@ export class LLMClient {
                     ? parsed
                     : {};
             } catch {
-                console.warn("Failed to parse tool arguments:", raw.slice(0, 200));
+                console.warn(
+                    "Failed to parse tool arguments:",
+                    raw.slice(0, 200),
+                );
                 return {};
             }
         }

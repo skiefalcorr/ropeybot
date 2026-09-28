@@ -59,6 +59,8 @@ export class LLMAgent {
     private running = false;
     private stopped = false;
     private emoticonMissingWarned = false;
+    /** Last emoticon actually sent to the server (avoids redundant updates). */
+    private currentEmoticon: "Hearing" | "Coding" | "Wardrobe" | null = null;
 
     constructor(
         private conn: API_Connector,
@@ -133,8 +135,11 @@ export class LLMAgent {
         }
         if (this.debounceStartedAt === 0) {
             this.debounceStartedAt = now;
-            // Feedback: we are accumulating events, waiting for the room to
-            // go quiet.
+        }
+        // Feedback: we are accumulating events, waiting for the room to go
+        // quiet. Only shown when idle — a running turn keeps its own
+        // "Coding"/"Wardrobe" emoticon.
+        if (!this.running) {
             this.setEmoticon("Hearing");
         }
 
@@ -170,6 +175,14 @@ export class LLMAgent {
         } finally {
             this.running = false;
             // If new events arrived while we were running, run another turn.
+            // Drop the timer armed mid-turn and start a FRESH debounce
+            // window, so the next turn waits out a full debounce delay
+            // instead of firing immediately.
+            if (this.debounceTimer) {
+                clearTimeout(this.debounceTimer);
+                this.debounceTimer = undefined;
+            }
+            this.debounceStartedAt = 0;
             if (this.pendingEvents.length > 0 && !this.stopped) {
                 this.scheduleTurn();
             }
@@ -259,11 +272,18 @@ export class LLMAgent {
                     return;
                 }
 
-                // Append the assistant message with tool calls.
+                // Append the assistant message with tool calls. Echo back
+                // the model's reasoning_content so it keeps its
+                // chain-of-thought across this turn's iterations. (The
+                // messages array is rebuilt on every turn, so reasoning
+                // never leaks between turns.)
                 messages.push({
                     role: "assistant",
                     content: null,
                     tool_calls: result.toolCalls,
+                    ...(result.reasoningContent
+                        ? { reasoning_content: result.reasoningContent }
+                        : {}),
                 });
 
                 // Execute each tool call and append the results.
@@ -274,7 +294,16 @@ export class LLMAgent {
                 );
                 const hasLookup = LOOKUP_TOOLS.some((t) => batchNames.has(t));
                 let endTurnRequested = false;
-                for (const call of result.toolCalls) {
+                const toolCallDelayMs = this.config.toolCallDelayMs ?? 150;
+                for (let i = 0; i < result.toolCalls.length; i++) {
+                    // Small pause between tool calls so the game server
+                    // receives the resulting messages in a stable order.
+                    if (i > 0 && toolCallDelayMs > 0) {
+                        await new Promise((r) =>
+                            setTimeout(r, toolCallDelayMs * i),
+                        );
+                    }
+                    const call = result.toolCalls[i];
                     const name = call.function.name;
                     const tool = this.toolMap.get(name);
                     const args = LLMClient.parseToolArgs(
@@ -346,6 +375,8 @@ export class LLMAgent {
      * Wardrobe = acting on lookup results, null = idle).
      */
     private setEmoticon(expr: "Hearing" | "Coding" | "Wardrobe" | null): void {
+        if (expr === this.currentEmoticon) return;
+        this.currentEmoticon = expr;
         const me = this.conn.Player;
         if (!me.Appearance.InventoryGet("Emoticon")) {
             if (!this.emoticonMissingWarned) {

@@ -44,6 +44,11 @@ export interface LLMConfig {
     deniedTools?: string[];
     /** Max tool-call iterations per agent turn. @default 5 */
     maxToolIterations?: number;
+    /**
+     * Delay (ms) between consecutive tool calls in a batch, so the game
+     * server receives the resulting messages in a stable order. @default 150
+     */
+    toolCallDelayMs?: number;
     /** Debounce window (ms) before an LLM turn is triggered after events. @default 1500 */
     debounceMs?: number;
     /**

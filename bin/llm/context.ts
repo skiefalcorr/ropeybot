@@ -20,6 +20,7 @@ import {
 } from "bc-bot";
 import lzString from "lz-string";
 import { CLOTHING_GROUPS } from "./tools";
+import { ITEM_GROUPS } from "./tools/catalog";
 
 /**
  * Decodes a character description that may be LZ-compressed.
@@ -292,9 +293,17 @@ export function describeCharacter(
     const pose = char.Pose.map((p) => p.Name).join(", ");
     if (pose) parts.push(`pose: ${pose}`);
 
-    const items = char.Appearance.allItems()
-        .filter((i) => i.Group.startsWith("Item"))
-        .map((i) => i.Name);
+    // const items = char.Appearance.allItems()
+    //     .filter((i) => i.Group.startsWith("Item"))
+    //     .map((i) => i.Name);
+    // if (items.length > 0) parts.push(`items: ${items.join(", ")}`);
+
+    const items = ITEM_GROUPS.filter((i) =>
+        char.Appearance.InventoryGet(i as never),
+    ).map((i) => {
+        const item = char.Appearance.InventoryGet(i as never);
+        return item ? `${i}:${item.Name}` : i;
+    });
     if (items.length > 0) parts.push(`items: ${items.join(", ")}`);
 
     const wearing = CLOTHING_GROUPS.filter((g) =>
