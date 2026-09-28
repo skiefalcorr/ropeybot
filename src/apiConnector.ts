@@ -541,7 +541,7 @@ export class API_Connector extends EventEmitter<ConnectorEvents> {
         const char = this.chatRoom!.getCharacter(resp.MemberNumber);
         if (!char) return;
         char.update({
-            ActivePose: resp.Pose as AssetPoseName[],
+            ActivePose: (resp.Pose ?? []) as AssetPoseName[],
         });
         this.emit("PoseChange", char);
         this.bot?.onCharacterEventPub(this, {
@@ -592,6 +592,8 @@ export class API_Connector extends EventEmitter<ConnectorEvents> {
         ) {
             console.log("chat room message", msg);
         }
+
+        //console.log("chat room message", msg);
 
         if (!msg.Sender) return;
         const char = this._chatRoom?.getCharacter(msg.Sender);

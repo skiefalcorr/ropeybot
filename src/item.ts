@@ -118,6 +118,37 @@ export class API_AppearanceItem {
         this.queueUpdate();
     }
 
+    /**
+     * Color the item's layers after the character's own appearance:
+     * layer 0 takes the character's hair color (from the HairFront item),
+     * layer 1 takes the character's eye color (from the Eyes item).
+     * Explicit `color1` / `color2` arguments override the character's
+     * colors. Remaining layers stay "Default".
+     */
+    public setColorFromCharacter(
+        color1?: string,
+        color2?: string,
+    ): void {
+        const layers = this.Asset.countColorableLayers();
+        if (layers === 0) return;
+
+        const hair = this.character.Appearance.InventoryGet("HairFront")
+            ?.GetColor();
+        const hairColor = Array.isArray(hair) ? hair[0] : hair;
+        const eyes = this.character.Appearance.InventoryGet("Eyes")
+            ?.GetColor();
+        const eyeColor = Array.isArray(eyes) ? eyes[0] : eyes;
+
+        const c1 = color1 ?? hairColor;
+        const c2 = color2 ?? eyeColor;
+
+        const colors: string[] = new Array(layers).fill("Default");
+        if (c1) colors[0] = c1;
+        if (c2 && layers > 1) colors[1] = c2;
+
+        this.SetColor(colors as BCColor[]);
+    }
+
     public SetCraft(craft: PartialCraftingData): void {
         this.data.Craft = Object.assign(
             {

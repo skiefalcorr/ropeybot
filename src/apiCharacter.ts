@@ -133,6 +133,9 @@ export class API_Character {
     public get NickName(): string {
         return this.data.Nickname;
     }
+    public get Description(): string {
+        return this.data.Description;
+    }
     public get Appearance(): AppearanceType {
         return this._appearance;
     }
@@ -140,7 +143,7 @@ export class API_Character {
         return this.data.MemberNumber;
     }
     public get Pose(): PoseObject[] {
-        return this.data.ActivePose.map((p) => {
+        return (this.data.ActivePose ?? []).map((p) => {
             return { Name: p };
         });
     }

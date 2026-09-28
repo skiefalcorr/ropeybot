@@ -22,6 +22,7 @@ import { Db, MongoClient } from "mongodb";
 import { PetSpa } from "./games/petspa";
 import { MaidsPartyNightSinglePlayerAdventure } from "./hub/logic/maidsPartyNightSinglePlayerAdventure";
 import { Casino } from "./games/casino";
+import { LLMGame } from "./games/llm";
 
 const SERVER_URL = {
     live: "https://bondage-club-server.herokuapp.com/",
@@ -130,6 +131,21 @@ export async function startBot(): Promise<RopeyBot> {
         case "casino":
             console.log("Starting game: Casino");
             new Casino(connector, db, config.casino);
+            break;
+        case "llm":
+            console.log("Starting game: LLM roleplay bot");
+            if (!config.llm) {
+                console.log("Missing 'llm' config section");
+                process.exit(1);
+            }
+            const llmGame = new LLMGame(
+                connector,
+                config,
+                config.llm,
+                config.superusers,
+            );
+            connector.startBot(llmGame);
+            await llmGame.init();
             break;
         default:
             console.log("No such game " + config.game);

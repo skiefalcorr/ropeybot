@@ -18,5 +18,42 @@
         "Game": "",
         "Language": "EN",
         "Admin": []
+    },
+    "llm": {
+        "url": "http://localhost:8080",
+        "model": "your-model-name",
+        "persona": "You are a friendly, playful character in a Bondage Club chat room. You can talk to other characters and, when appropriate, interact with them using the available tools (adding/removing items, changing poses, etc.). Keep roleplay tasteful and in-character. If a character uses a safeword, stop all actions toward them immediately.",
+        "allowedTools": [],
+        "deniedTools": [],
+        "_availableTools": {
+            "sendMessage": "Send a message to the room or a specific character (Chat / Emote / Activity / Whisper).",
+            "listItems": "List available items (restraints/BDSM gear) as group:asset names, optionally filtered by group, fetish tag, or search term.",
+            "listClothing": "List available clothing/body appearance groups as group:asset names, optionally filtered by group, fetish tag, or search term.",
+            "listPoses": "List all valid pose names.",
+            "addItem": "Add an item (restraint, clothing, etc.) to a character. Restraints are paced to avoid anti-cheat.",
+            "removeItem": "Remove an item from a character by group.",
+            "stripAll": "Remove ALL items (restraints) from a character, paced one-by-one.",
+            "setPose": "Set a character's active pose (list of pose names).",
+            "setExpression": "Set a facial expression on a character (e.g. group 'Face').",
+            "lockItem": "Lock an item on a character so it cannot be removed.",
+            "moveSelf": "Move the bot's own character to a position on the room map.",
+            "leash" : "Hold or release a character's leash (works in map rooms). Holding the leash prevents the target from leaving the room and forces them to follow you around the map and into other chat rooms. Release the leash when you no longer need to control their movement."
+        },
+        "maxToolIterations": 5,
+        "debounceMs": 1500,
+        "debounceMaxWaitMs": 5000,
+        "historyLength": 40,
+        "bioLength": 200,
+        "temperature": 0.8,
+        "maxTokens": 512,
+        "timeoutMs": 120000,
+        "safewords": ["red"],
+        "safewordSuspendMs": 600000,
+        "maxActionsPerMinute": 10,
+        "targetCooldownMs": 5000,
+        "protectedMembers": [],
+        "startPose": [],
+        "_llmLog": "Optional file path (e.g. \"llm.log\"). When set, every full LLM request (complete prompt) and response (content, tool calls, token usage) is appended to that file as JSONL. llama-server's own log is either an overview or per-token, so this captures the in-between.",
+        "llmLog": ""
     }
 }
