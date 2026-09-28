@@ -435,7 +435,7 @@ export function buildTools(): Tool[] {
         name: "addItem",
         definition: def(
             "addItem",
-            "Add an item (restraint, clothing, etc.) to a character. Use listItems (restraints/BDSM) or listClothing (clothing/body) to find valid group/asset names. The item is automatically colored: its first colorable layer takes the character's hair color and the second takes their eye color; pass color1/color2 to override. Optionally set a craft name/description so the item shows up as a named craft.",
+            "Add an item (restraint, clothing, etc.) to a character. Use listItems (restraints/BDSM) or listClothing (clothing/body) to find valid group/asset names. The item is automatically colored; pass color1/color2 to override. Optionally set a craft name/description so the item shows up as a named craft.",
             {
                 memberNumber: {
                     type: "number",

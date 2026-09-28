@@ -58,6 +58,7 @@ export class LLMAgent {
     private debounceStartedAt = 0;
     private running = false;
     private stopped = false;
+    private emoticonMissingWarned = false;
 
     constructor(
         private conn: API_Connector,
@@ -132,6 +133,9 @@ export class LLMAgent {
         }
         if (this.debounceStartedAt === 0) {
             this.debounceStartedAt = now;
+            // Feedback: we are accumulating events, waiting for the room to
+            // go quiet.
+            this.setEmoticon("Hearing");
         }
 
         const debounceMs = this.config.debounceMs ?? 1500;
@@ -220,103 +224,139 @@ export class LLMAgent {
 
         this.logger?.newTurn();
 
-        for (let i = 0; i < maxIterations; i++) {
-            let result;
-            this.logger?.logRequest(messages, chatOptions);
-            const t0 = Date.now();
-            try {
-                result = await this.client.chat(messages, chatOptions);
-            } catch (e) {
-                console.error("LLM chat error:", e);
-                this.logger?.logError(String(e));
-                return;
-            }
-            this.logger?.logResponse(result, Date.now() - t0);
+        // Whether the previous tool batch contained a lookup tool; decides
+        // which "thinking" emoticon to show before the next LLM call.
+        let prevBatchHadLookup = false;
 
-            // Plain text response: send it to the room and finish.
-            if (result.content && result.content.trim()) {
-                const text = result.content.trim();
-                this.conn.SendMessage("Chat", text);
-                this.contextBuilder.recordOutgoing("Chat", text);
-                return;
-            }
+        try {
+            for (let i = 0; i < maxIterations; i++) {
+                // Feedback: "Wardrobe" while deciding what to do with lookup
+                // results, "Coding" while generating normally.
+                this.setEmoticon(prevBatchHadLookup ? "Wardrobe" : "Coding");
 
-            // No content and no tool calls: nothing to do.
-            if (result.toolCalls.length === 0) {
-                return;
-            }
+                let result;
+                this.logger?.logRequest(messages, chatOptions);
+                const t0 = Date.now();
+                try {
+                    result = await this.client.chat(messages, chatOptions);
+                } catch (e) {
+                    console.error("LLM chat error:", e);
+                    this.logger?.logError(String(e));
+                    return;
+                }
+                this.logger?.logResponse(result, Date.now() - t0);
 
-            // Append the assistant message with tool calls.
-            messages.push({
-                role: "assistant",
-                content: null,
-                tool_calls: result.toolCalls,
-            });
-
-            // Execute each tool call and append the results.
-            // If endTurn is chained with a lookup tool (listItems etc.) in the
-            // same batch, ignore it and remind the model to act first.
-            const batchNames = new Set(
-                result.toolCalls.map((c) => c.function.name),
-            );
-            const hasLookup = LOOKUP_TOOLS.some((t) => batchNames.has(t));
-            let endTurnRequested = false;
-            for (const call of result.toolCalls) {
-                const name = call.function.name;
-                const tool = this.toolMap.get(name);
-                const args = LLMClient.parseToolArgs(call.function.arguments);
-                let resultText: string;
-
-                if (!tool) {
-                    resultText = `Error: unknown tool '${name}'.`;
-                } else {
-                    console.log(
-                        `LLM tool call: ${name}(${JSON.stringify(args)})`,
-                    );
-                    try {
-                        resultText = await tool.handler(args, this.ctx);
-                    } catch (e) {
-                        resultText = `Error executing ${name}: ${String(e)}`;
-                    }
+                // Plain text response: send it to the room and finish.
+                if (result.content && result.content.trim()) {
+                    const text = result.content.trim();
+                    this.conn.SendMessage("Chat", text);
+                    this.contextBuilder.recordOutgoing("Chat", text);
+                    return;
                 }
 
-                console.log(`  -> ${resultText.slice(0, 200)}`);
-
-                // Record outgoing messages so the LLM knows what it said.
-                if (name === "sendMessage" && args.content) {
-                    this.contextBuilder.recordOutgoing(
-                        String(args.type ?? "Chat"),
-                        String(args.content),
-                    );
+                // No content and no tool calls: nothing to do.
+                if (result.toolCalls.length === 0) {
+                    return;
                 }
 
-                if (name === "endTurn") {
-                    if (hasLookup) {
-                        resultText =
-                            "endTurn ignored: you called a lookup tool (listItems/listClothing/listPoses) in this batch. Perform your intended action first, then call endTurn.";
-                        console.log(`  -> ${resultText}`);
-                    } else {
-                        endTurnRequested = true;
-                    }
-                }
-
+                // Append the assistant message with tool calls.
                 messages.push({
-                    role: "tool",
-                    tool_call_id: call.id,
-                    name,
-                    content: resultText,
+                    role: "assistant",
+                    content: null,
+                    tool_calls: result.toolCalls,
                 });
+
+                // Execute each tool call and append the results.
+                // If endTurn is chained with a lookup tool (listItems etc.) in the
+                // same batch, ignore it and remind the model to act first.
+                const batchNames = new Set(
+                    result.toolCalls.map((c) => c.function.name),
+                );
+                const hasLookup = LOOKUP_TOOLS.some((t) => batchNames.has(t));
+                let endTurnRequested = false;
+                for (const call of result.toolCalls) {
+                    const name = call.function.name;
+                    const tool = this.toolMap.get(name);
+                    const args = LLMClient.parseToolArgs(
+                        call.function.arguments,
+                    );
+                    let resultText: string;
+
+                    if (!tool) {
+                        resultText = `Error: unknown tool '${name}'.`;
+                    } else {
+                        console.log(
+                            `LLM tool call: ${name}(${JSON.stringify(args)})`,
+                        );
+                        try {
+                            resultText = await tool.handler(args, this.ctx);
+                        } catch (e) {
+                            resultText = `Error executing ${name}: ${String(e)}`;
+                        }
+                    }
+
+                    console.log(`  -> ${resultText.slice(0, 200)}`);
+
+                    // Record outgoing messages so the LLM knows what it said.
+                    if (name === "sendMessage" && args.content) {
+                        this.contextBuilder.recordOutgoing(
+                            String(args.type ?? "Chat"),
+                            String(args.content),
+                        );
+                    }
+
+                    if (name === "endTurn") {
+                        if (hasLookup) {
+                            resultText =
+                                "endTurn ignored: you called a lookup tool (listItems/listClothing/listPoses) in this batch. Perform your intended action first, then call endTurn.";
+                            console.log(`  -> ${resultText}`);
+                        } else {
+                            endTurnRequested = true;
+                        }
+                    }
+
+                    messages.push({
+                        role: "tool",
+                        tool_call_id: call.id,
+                        name,
+                        content: resultText,
+                    });
+                }
+
+                // If the model called endTurn, stop the loop.
+                if (endTurnRequested) {
+                    return;
+                }
+
+                prevBatchHadLookup = hasLookup;
             }
 
-            // If the model called endTurn, stop the loop.
-            if (endTurnRequested) {
-                return;
-            }
+            console.warn(
+                `LLM agent hit max tool iterations (${maxIterations}) without a final message.`,
+            );
+        } finally {
+            // Idle: clear the feedback emoticon on every exit path.
+            this.setEmoticon(null);
         }
+    }
 
-        console.warn(
-            `LLM agent hit max tool iterations (${maxIterations}) without a final message.`,
-        );
+    /**
+     * Set the bot's Emoticon as a working-state indicator
+     * (Hearing = accumulating events, Coding = generating,
+     * Wardrobe = acting on lookup results, null = idle).
+     */
+    private setEmoticon(expr: "Hearing" | "Coding" | "Wardrobe" | null): void {
+        const me = this.conn.Player;
+        if (!me.Appearance.InventoryGet("Emoticon")) {
+            if (!this.emoticonMissingWarned) {
+                this.emoticonMissingWarned = true;
+                console.warn(
+                    "Bot has no Emoticon item; working-state emoticons disabled.",
+                );
+            }
+            return;
+        }
+        me.SetExpression("Emoticon", expr);
     }
 
     /**
@@ -403,6 +443,7 @@ export class LLMAgent {
             this.debounceTimer = undefined;
         }
         this.debounceStartedAt = 0;
+        this.setEmoticon(null);
         this.logger?.close();
     }
 }

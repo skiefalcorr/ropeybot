@@ -131,6 +131,18 @@ export class LLMGame extends LogicBase {
         // Ignore our own messages (the server echoes them back).
         if (sender.MemberNumber === me.MemberNumber) return;
 
+        // Ignore non-text message types.
+        if (message.Type !== "Chat" && message.Type !== "Emote" && message.Type !== "Whisper" && message.Type !== "Activity") return;
+
+        // Safeword check first: if the sender used a safeword, handle it and
+        // do NOT feed the raw message to the agent as a normal prompt.
+        if (this.agent.handleSafeword(sender, message.Content)) {
+            return;
+        }
+
+        // Only participants' messages are fed to the agent.
+        if (!this.agent.isParticipant(sender.MemberNumber)) return;
+
         // Activities are physical actions, not speech: extract a readable
         // sentence from the message dictionary and feed it in as a regular
         // message. They never trigger safeword handling.
@@ -144,18 +156,6 @@ export class LLMGame extends LogicBase {
             }
             return;
         }
-
-        // Ignore non-text message types.
-        if (message.Type !== "Chat" && message.Type !== "Emote" && message.Type !== "Whisper") return;
-
-        // Safeword check first: if the sender used a safeword, handle it and
-        // do NOT feed the raw message to the agent as a normal prompt.
-        if (this.agent.handleSafeword(sender, message.Content)) {
-            return;
-        }
-
-        // Only participants' messages are fed to the agent.
-        if (!this.agent.isParticipant(sender.MemberNumber)) return;
 
         this.agent.onIncomingMessage(sender, message);
     }
