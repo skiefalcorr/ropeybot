@@ -24,6 +24,11 @@ import { type CasinoConfig } from "./games/casino";
 export interface LLMConfig {
     /** Base URL of llama-server, e.g. "http://localhost:8080". */
     url: string;
+    /**
+     * Display name of the bot, used in the bio disclaimer so players can
+     * tell it's an AI. If omitted, the bot's nickname is used.
+     */
+    botName?: string;
     /** Model name as served by llama-server. Optional; defaults to the loaded model. */
     model?: string;
     /** API key, if llama-server was started with --api-key. Optional. */

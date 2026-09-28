@@ -22,6 +22,7 @@ import {
 } from "bc-bot";
 import { LLMConfig, ConfigFile } from "../config";
 import { LLMAgent } from "../llm/agent";
+import { decodeDescription, withBotDisclaimer } from "../llm/context";
 
 /**
  * The LLM-powered roleplay game. It wires room events into an {@link LLMAgent}
@@ -42,6 +43,16 @@ export class LLMGame extends LogicBase {
 
     private agent: LLMAgent;
     private commandParser: CommandParser;
+    /** Nickname as it was before init() modified it, restored on stop(). */
+    private originalNickname: string | undefined;
+    /**
+     * Decoded bio as it was before init() appended the disclaimer.
+     * accountUpdate() does not update local state, so we can't rely on
+     * me.Description in stop() — restore from this snapshot instead.
+     */
+    private originalBio: string | undefined;
+    /** Whether init() actually appended the disclaimer (so stop() knows to remove it). */
+    private disclaimerAdded = false;
 
     constructor(
         private conn: API_Connector,
@@ -100,13 +111,28 @@ export class LLMGame extends LogicBase {
     };
 
     /**
-     * Self-setup: nickname, description, and optional starting pose.
+     * Self-setup: nickname, bio disclaimer, and optional starting pose.
      */
     public async init(): Promise<void> {
         const me = this.conn.Player;
 
-        //this.conn.accountUpdate({ Nickname: "Ropey LLM" });
-        //this.conn.setBotDescription(LLMGame.description);
+        // Mark the nickname so players can tell it's a bot.
+        this.originalNickname = me.NickName;
+        const currentNick = me.NickName || me.Name;
+        if (!currentNick.endsWith(" BOT")) {
+            this.conn.accountUpdate({ Nickname: `${currentNick} BOT` });
+        }
+
+        // Append the AI disclaimer to the bio (idempotent). The original bio
+        // is preserved; describeCharacter strips the disclaimer before it
+        // reaches the LLM.
+        const bio = decodeDescription(me.Description ?? "");
+        this.originalBio = bio;
+        const newBio = withBotDisclaimer(bio, this.llmConfig.model);
+        if (newBio !== bio) {
+            this.disclaimerAdded = true;
+            this.conn.setBotDescription(newBio);
+        }
 
         // Optional starting pose for the bot itself.
         const startPose = this.llmConfig.startPose;
@@ -132,7 +158,13 @@ export class LLMGame extends LogicBase {
         if (sender.MemberNumber === me.MemberNumber) return;
 
         // Ignore non-text message types.
-        if (message.Type !== "Chat" && message.Type !== "Emote" && message.Type !== "Whisper" && message.Type !== "Activity") return;
+        if (
+            message.Type !== "Chat" &&
+            message.Type !== "Emote" &&
+            message.Type !== "Whisper" &&
+            message.Type !== "Activity"
+        )
+            return;
 
         // Safeword check first: if the sender used a safeword, handle it and
         // do NOT feed the raw message to the agent as a normal prompt.
@@ -235,10 +267,25 @@ export class LLMGame extends LogicBase {
     }
 
     /**
-     * Stop the agent (called on shutdown).
+     * Stop the agent and undo the self-setup changes (called on shutdown).
      */
-    public stop(): void {
+    public async stop(): Promise<void> {
         this.agent.stop();
+
+        // Restore the original nickname.
+        if (this.originalNickname !== undefined) {
+            this.conn.accountUpdate({ Nickname: this.originalNickname });
+            this.originalNickname = undefined;
+        }
+
+        // Remove the AI disclaimer from the bio, if we added it. We restore
+        // from the snapshot taken in init() because accountUpdate() does not
+        // update local state, so me.Description may still be stale.
+        if (this.disclaimerAdded && this.originalBio !== undefined) {
+            this.conn.setBotDescription(this.originalBio);
+            this.disclaimerAdded = false;
+            this.originalBio = undefined;
+        }
     }
 }
 

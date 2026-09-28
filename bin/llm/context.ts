@@ -48,6 +48,50 @@ export function decodeDescription(raw: string): string {
 }
 
 /**
+ * Marker for the AI-bot disclaimer block appended to the bot's bio.
+ * A unique sentinel so we can detect and strip it reliably.
+ */
+export const BOT_DISCLAIMER_MARKER = "AI Bot:";
+
+/**
+ * Build the disclaimer block for the bot's bio.
+ */
+export function botDisclaimer(modelName: string): string {
+    return (
+        `\n\n${BOT_DISCLAIMER_MARKER} This AI bot is powered by local LLM "${modelName}". \n` +
+        `Model doesn't send data to anyone, but runs slowly. \n` +
+        `It should be able to RP, apply and remove restraints, and hold leash, lol. \n` +
+        `It shows emotes for current state: code when LLM thinks, wardrobe when it looks up items, and listening when it waits to begin its turn. \n` +
+        `To allow the bot to react to you, write /bot start. And a greeting. \n` +
+        `Available commands: /bot start, /bot stop, /bot status. \n` +
+        `Source code is at https://github.com/skiefalcorr/ropeybot`
+    );
+}
+
+/**
+ * Append the bot disclaimer to a bio if it is not already present.
+ */
+export function withBotDisclaimer(bio: string, modelName: string): string {
+    if (bio.includes(BOT_DISCLAIMER_MARKER)) return bio;
+    const trimmed = bio.trimEnd();
+    return trimmed
+        ? `${trimmed}\n${botDisclaimer(modelName)}`
+        : botDisclaimer(modelName);
+}
+
+/**
+ * Remove the bot disclaimer block from a bio, if present.
+ */
+export function stripBotDisclaimer(bio: string): string {
+    const idx = bio.indexOf(BOT_DISCLAIMER_MARKER);
+    if (idx === -1) return bio;
+    const end = bio.indexOf("]", idx);
+    return (
+        end === -1 ? bio.slice(0, idx) : bio.slice(0, idx) + bio.slice(end + 1)
+    ).trim();
+}
+
+/**
  * A single entry in the rolling chat history.
  */
 export interface HistoryEntry {
@@ -235,7 +279,10 @@ export function describeCharacter(
     const gender = genderLabel(char);
     if (gender) parts.push(gender);
 
-    const bio = decodeDescription(char.Description ?? "").trim();
+    // Strip the AI-bot disclaimer so the LLM never sees the boilerplate.
+    const bio = stripBotDisclaimer(
+        decodeDescription(char.Description ?? ""),
+    ).trim();
     if (bio && bioLength > 0) {
         parts.push(
             `bio: ${bio.length > bioLength ? bio.slice(0, bioLength) + "…" : bio}`,

@@ -34,18 +34,23 @@ export interface RopeyBot {
     config: ConfigFile;
     db?: Db;
     game: string;
+    /** Optional async cleanup run on shutdown (e.g. restore bot bio/nickname). */
+    cleanup?: () => Promise<void>;
 }
 
 export async function startBot(): Promise<RopeyBot> {
-    process.on("SIGINT", () => {
-        console.log("SIGINT received, exiting");
+    let cleanup: (() => Promise<void>) | undefined;
+    const shutdown = async (signal: string) => {
+        console.log(`${signal} received, shutting down...`);
+        try {
+            await cleanup?.();
+        } catch (e) {
+            console.error("Error during cleanup:", e);
+        }
         process.exit(0);
-    });
-
-    process.on("SIGTERM", () => {
-        console.log("SIGTERM received, exiting");
-        process.exit(0);
-    });
+    };
+    process.on("SIGINT", () => void shutdown("SIGINT"));
+    process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
     const cfgFile = process.argv[2] ?? "./config.json";
 
@@ -146,6 +151,7 @@ export async function startBot(): Promise<RopeyBot> {
             );
             connector.startBot(llmGame);
             await llmGame.init();
+            cleanup = () => llmGame.stop();
             break;
         default:
             console.log("No such game " + config.game);
@@ -157,6 +163,7 @@ export async function startBot(): Promise<RopeyBot> {
         config,
         db,
         game: config.game,
+        cleanup,
     };
 }
 
