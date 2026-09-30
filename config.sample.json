@@ -27,6 +27,8 @@
         "persona": "You are a friendly, playful character in a Bondage Club chat room. You can talk to other characters and, when appropriate, interact with them using the available tools (adding/removing items, changing poses, etc.). Keep roleplay tasteful and in-character. If a character uses a safeword, stop all actions toward them immediately.",
         "allowedTools": [],
         "deniedTools": [],
+        "_roomTools": "Enable/disable the room-management tools (searchRooms, roomInfo, joinRoom, leaveRoom, createRoom, updateRoom, roomAdmin). Defaults to true.",
+        "roomTools": true,
         "_availableTools": {
             "sendMessage": "Send a message to the room or a specific character (Chat / Emote / Activity / Whisper).",
             "listItems": "List available items (restraints/BDSM gear) as group:asset names, optionally filtered by group, fetish tag, or search term.",
@@ -39,7 +41,14 @@
             "setExpression": "Set a facial expression on a character (e.g. group 'Face').",
             "lockItem": "Lock an item on a character so it cannot be removed.",
             "moveSelf": "Move the bot's own character to a position on the room map.",
-            "leash": "Hold or release a character's leash (works in map rooms). Holding the leash prevents the target from leaving the room and forces them to follow you around the map and into other chat rooms. Release the leash when you no longer need to control their movement."
+            "leash": "Hold or release a character's leash (works in map rooms). Holding the leash prevents the target from leaving the room and forces them to follow you around the map and into other chat rooms. Release the leash when you no longer need to control their movement.",
+            "searchRooms": "Search for public chat rooms on the server by name/description. Returns rooms with member counts and whether the bot can join.",
+            "roomInfo": "Get the current room's settings and member list: name, description, space, game, access/visibility, admins, banned/whitelisted members, and all characters present.",
+            "joinRoom": "Leave the current room and join another room by its exact name.",
+            "leaveRoom": "Leave the current room.",
+            "createRoom": "Create a new chat room and enter it. Unspecified settings are inherited from the bot's configured room. The bot is automatically an admin.",
+            "updateRoom": "Update settings of the current room (description, background, access, visibility, limit, game, language, block categories). Requires the bot to be a room admin.",
+            "roomAdmin": "Perform an admin action on a room member: kick, ban, unban, promote, demote, whitelist, unwhitelist. Requires the bot to be a room admin."
         },
         "maxToolIterations": 5,
         "toolCallDelayMs": 150,

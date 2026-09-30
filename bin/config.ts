@@ -42,6 +42,11 @@ export interface LLMConfig {
     allowedTools?: string[];
     /** Blacklist of tool names the LLM must never use (e.g. destructive admin tools). */
     deniedTools?: string[];
+    /**
+     * Enable the room-management tools (searchRooms, roomInfo, joinRoom,
+     * leaveRoom, createRoom, updateRoom, roomAdmin). @default true
+     */
+    roomTools?: boolean;
     /** Max tool-call iterations per agent turn. @default 5 */
     maxToolIterations?: number;
     /**

@@ -12,7 +12,7 @@
  * limitations under the License.
  */
 
-import { API_Connector, API_Character } from "bc-bot";
+import { API_Connector, API_Character, type RoomDefinition } from "bc-bot";
 import { LLMToolDefinition } from "../llmClient";
 import { LLMConfig } from "../../config";
 
@@ -23,6 +23,11 @@ import { LLMConfig } from "../../config";
  */
 export interface Tool {
     name: string;
+    /**
+     * Optional category tag used to enable/disable groups of tools via
+     * config (e.g. the "room" category is gated by `llm.roomTools`).
+     */
+    category?: string;
     definition: LLMToolDefinition;
     handler: (
         args: Record<string, unknown>,
@@ -33,6 +38,8 @@ export interface Tool {
 export interface ToolContext {
     conn: API_Connector;
     config: LLMConfig;
+    /** The bot's configured room definition, used as defaults for room tools. */
+    room: RoomDefinition;
     /** Member numbers that must never be acted upon. */
     protectedMembers: number[];
     /** Member numbers currently suspended (safeword) with their expiry. */
@@ -107,6 +114,20 @@ export function requireParticipant(
     if (memberNumber === ctx.conn.Player.MemberNumber) return null;
     if (!ctx.participants.has(memberNumber)) {
         return "Refused: that character is not participating. They must use /bot start first.";
+    }
+    return null;
+}
+
+/**
+ * Room-admin gate. Returns null if the bot is an admin of the current room,
+ * or an error string explaining the refusal.
+ */
+export function requireRoomAdmin(ctx: ToolContext): string | null {
+    const room = ctx.conn.chatRoom;
+    if (!room) return "Error: not in a room.";
+    const me = ctx.conn.Player.MemberNumber;
+    if (!room.Admin.includes(me)) {
+        return "Refused: the bot is not an admin of this room.";
     }
     return null;
 }

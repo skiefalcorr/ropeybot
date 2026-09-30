@@ -670,6 +670,7 @@ export class API_Connector extends EventEmitter<ConnectorEvents> {
         console.log("Chat room search result", results);
         if (!this.roomSearchPromise) return;
         this.roomSearchPromise.resolve(results);
+        this.roomSearchPromise = undefined;
     };
 
     private onChatRoomSearchResponse = (
@@ -810,7 +811,7 @@ export class API_Connector extends EventEmitter<ConnectorEvents> {
         this.roomJoined = undefined;
     }
 
-    private searchRooms(
+    public searchRooms(
         q: string,
         space: ServerChatRoomSpace,
     ): Promise<ServerChatRoomSearchData[]> {

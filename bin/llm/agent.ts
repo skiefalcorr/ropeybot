@@ -16,6 +16,7 @@ import {
     API_Connector,
     API_Character,
     BC_Server_ChatRoomMessage,
+    type RoomDefinition,
 } from "bc-bot";
 import { LLMClient, LLMChatOptions, LLMMessage } from "./llmClient";
 import { buildTools, resolveTools, Tool, ToolContext } from "./tools";
@@ -66,6 +67,7 @@ export class LLMAgent {
         private conn: API_Connector,
         private config: LLMConfig,
         private superusers: number[],
+        private room: RoomDefinition,
     ) {
         this.client = new LLMClient(
             config.url,
@@ -80,6 +82,7 @@ export class LLMAgent {
         this.ctx = {
             conn,
             config,
+            room,
             protectedMembers: [
                 ...superusers,
                 ...(config.protectedMembers ?? []),
@@ -465,6 +468,61 @@ export class LLMAgent {
      */
     getParticipants(): number[] {
         return [...this.ctx.participants];
+    }
+
+    /**
+     * Look up a tool by name (for the in-game `!tool` test command).
+     */
+    getTool(name: string): Tool | undefined {
+        return this.toolMap.get(name);
+    }
+
+    /**
+     * All tools the LLM is allowed to use (after allowed/denied filtering).
+     */
+    getTools(): Tool[] {
+        return this.tools;
+    }
+
+    /**
+     * Execute a tool directly, bypassing the LLM. Returns the tool's result
+     * string, or an error string if the tool is unknown or throws.
+     */
+    async runTool(
+        name: string,
+        args: Record<string, unknown>,
+    ): Promise<string> {
+        const tool = this.toolMap.get(name);
+        if (!tool) return `Error: unknown tool '${name}'.`;
+        console.log(`Manual tool call: ${name}(${JSON.stringify(args)})`);
+        try {
+            return await tool.handler(args, this.ctx);
+        } catch (e) {
+            return `Error executing ${name}: ${String(e)}`;
+        }
+    }
+
+    /**
+     * A short human-readable snapshot of the agent's state, for the
+     * `!toolstatus` command.
+     */
+    getToolStatus(): string {
+        const now = Date.now();
+        const windowMs = 60_000;
+        const recentActions = this.ctx.actionTimestamps.filter(
+            (t) => t >= now - windowMs,
+        ).length;
+        const maxPerMinute = this.config.maxActionsPerMinute ?? 10;
+        const suspended = [...this.ctx.suspended.entries()]
+            .filter(([, until]) => until > now)
+            .map(([n, until]) => `${n} (${Math.ceil((until - now) / 1000)}s)`);
+        const leashed = [...this.ctx.leashed.keys()];
+        return [
+            `Participants: ${this.getParticipants().join(", ") || "(none)"}`,
+            `Rate limit: ${recentActions}/${maxPerMinute} actions in the last minute`,
+            `Suspended (safeword): ${suspended.join(", ") || "(none)"}`,
+            `Leashed: ${leashed.join(", ") || "(none)"}`,
+        ].join("\n");
     }
 
     stop(): void {

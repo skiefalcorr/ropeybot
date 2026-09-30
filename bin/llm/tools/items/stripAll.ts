@@ -53,6 +53,6 @@ export const stripAllTool: Tool = {
             },
             true,
         );
-        return `Stripped all items from ${target.Name}.`;
+        return `Stripped all clothes from ${target.Name}.`;
     },
 };

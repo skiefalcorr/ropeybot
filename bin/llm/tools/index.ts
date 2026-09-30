@@ -25,9 +25,17 @@ import { addItemTool } from "./items/addItem";
 import { removeItemTool } from "./items/removeItem";
 import { stripAllTool } from "./items/stripAll";
 import { lockItemTool } from "./modification/lockItem";
+import { setVibratorTool } from "./modification/setVibrator";
 import { setPoseTool } from "./body/setPose";
 import { setExpressionTool } from "./body/setExpression";
 import { leashTool } from "./room/leash";
+import { searchRoomsTool } from "./room/searchRooms";
+import { roomInfoTool } from "./room/roomInfo";
+import { joinRoomTool } from "./room/joinRoom";
+import { leaveRoomTool } from "./room/leaveRoom";
+import { createRoomTool } from "./room/createRoom";
+import { updateRoomTool } from "./room/updateRoom";
+import { roomAdminTool } from "./room/roomAdmin";
 import { moveSelfTool } from "./map/moveSelf";
 
 export { Tool, ToolContext } from "./shared";
@@ -50,22 +58,38 @@ export function buildTools(): Tool[] {
         setExpressionTool,
         // Locks
         lockItemTool,
+        // Vibrator control
+        setVibratorTool,
         // Movement (self)
         moveSelfTool,
         // Turn control
         endTurnTool,
         // Leash
         leashTool,
+        // Room management
+        searchRoomsTool,
+        roomInfoTool,
+        joinRoomTool,
+        leaveRoomTool,
+        createRoomTool,
+        updateRoomTool,
+        roomAdminTool,
     ];
 }
 
 /**
  * Resolve the set of tools the LLM is allowed to use, based on config
- * allowedTools / deniedTools.
+ * allowedTools / deniedTools. The "room" category (room discovery, join,
+ * create, leave, modify, admin) is only included when `roomTools` is not
+ * explicitly disabled.
  */
 export function resolveTools(all: Tool[], config: LLMConfig): Tool[] {
     const denied = new Set(config.deniedTools ?? []);
-    let tools = all.filter((t) => !denied.has(t.name));
+    let tools = all.filter(
+        (t) =>
+            !denied.has(t.name) &&
+            (t.category !== "room" || config.roomTools !== false),
+    );
     if (config.allowedTools && config.allowedTools.length > 0) {
         const allowed = new Set(config.allowedTools);
         tools = tools.filter((t) => allowed.has(t.name));

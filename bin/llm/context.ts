@@ -21,6 +21,7 @@ import {
 import lzString from "lz-string";
 import { CLOTHING_GROUPS } from "./tools";
 import { ITEM_GROUPS } from "./tools/catalog";
+import { vibratorState } from "./tools/modification/setVibrator";
 
 /**
  * Decodes a character description that may be LZ-compressed.
@@ -302,7 +303,9 @@ export function describeCharacter(
         char.Appearance.InventoryGet(i as never),
     ).map((i) => {
         const item = char.Appearance.InventoryGet(i as never);
-        return item ? `${i}:${item.Name}` : i;
+        if (!item) return i;
+        const vibe = vibratorState(item);
+        return vibe ? `${i}:${item.Name} [vibe:${vibe}]` : `${i}:${item.Name}`;
     });
     if (items.length > 0) parts.push(`items: ${items.join(", ")}`);
 
@@ -316,7 +319,7 @@ export function describeCharacter(
 
     if (isNaked(char)) parts.push("naked");
     if (char.IsRestrained()) parts.push("restrained");
-    if (!char.CanTalk()) parts.push("muted");
+    if (!char.CanTalk()) parts.push("gagged");
 
     const pos = char.MapPos;
     if (pos && (pos.X !== 0 || pos.Y !== 0)) {

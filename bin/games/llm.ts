@@ -23,6 +23,7 @@ import {
 import { LLMConfig, ConfigFile } from "../config";
 import { LLMAgent } from "../llm/agent";
 import { decodeDescription, withBotDisclaimer } from "../llm/context";
+import { parseToolArgs } from "../llm/tools/toolCommand";
 
 /**
  * The LLM-powered roleplay game. It wires room events into an {@link LLMAgent}
@@ -38,6 +39,7 @@ export class LLMGame extends LogicBase {
         "It chats and interacts with characters in the room, using a local LLM to decide its actions.",
         "Use !start to join, !stop to leave, !status to list participants.",
         "Say a safeword to make it stop and remove any items it placed on you.",
+        "Superusers can test tools without the LLM: !tools, !tool <name> [args], !toolstatus.",
         "Code at https://github.com/FriendsOfBC/ropeybot",
     ].join("\n");
 
@@ -58,15 +60,102 @@ export class LLMGame extends LogicBase {
         private conn: API_Connector,
         private config: ConfigFile,
         private llmConfig: LLMConfig,
-        superusers: number[],
+        private superusers: number[],
     ) {
         super();
-        this.agent = new LLMAgent(conn, llmConfig, superusers);
+        this.agent = new LLMAgent(conn, llmConfig, superusers, config.room);
         this.commandParser = new CommandParser(conn);
         this.commandParser.register("start", this.onCommandStart);
         this.commandParser.register("stop", this.onCommandStop);
         this.commandParser.register("status", this.onCommandStatus);
+        this.commandParser.register("tools", this.onCommandTools);
+        this.commandParser.register("tool", this.onCommandTool);
+        this.commandParser.register("toolstatus", this.onCommandToolStatus);
     }
+
+    /**
+     * Whether the sender is a superuser (allowed to use the tool test commands).
+     */
+    private isSuperuser(sender: API_Character): boolean {
+        return this.superusers.includes(sender.MemberNumber);
+    }
+
+    /**
+     * The CommandParser lowercases the whole command string before splitting,
+     * which would mangle case-sensitive tool names and args (e.g. 'ItemMouth').
+     * Re-extract the raw substring after the 'tool ' prefix from the original
+     * message content so case is preserved.
+     */
+    private extractRawToolArgs(msg: BC_Server_ChatRoomMessage): string {
+        const content = msg.Content.replace(/^\(+/, "").replace(/\)+$/, "");
+        const lower = content.toLowerCase();
+        const idx = lower.indexOf("tool ");
+        if (idx === -1) return "";
+        return content.slice(idx + "tool ".length).trim();
+    }
+
+    private onCommandTools = (
+        sender: API_Character,
+        msg: BC_Server_ChatRoomMessage,
+    ): void => {
+        if (!this.isSuperuser(sender)) {
+            this.conn.reply(msg, "Not authorized.");
+            return;
+        }
+        const tools = this.agent.getTools();
+        const lines = tools.map((t) => {
+            const props = t.definition.function.parameters.properties;
+            const required = t.definition.function.parameters.required ?? [];
+            const params = Object.entries(props)
+                .map(([k, p]) => {
+                    const req = required.includes(k) ? "" : "?";
+                    const enumStr = p.enum ? ` (${p.enum.join("|")})` : "";
+                    return `${k}${req}:${p.type}${enumStr}`;
+                })
+                .join(", ");
+            return `!tool ${t.name} ${params}`;
+        });
+        this.conn.reply(
+            msg,
+            `Available tools (${tools.length}):\n${lines.join("\n")}\n\nUsage: !tool <name> [key=value ...] or !tool <name> {"key":value}`,
+        );
+    };
+
+    private onCommandTool = async (
+        sender: API_Character,
+        msg: BC_Server_ChatRoomMessage,
+    ): Promise<void> => {
+        if (!this.isSuperuser(sender)) {
+            this.conn.reply(msg, "Not authorized.");
+            return;
+        }
+        const raw = this.extractRawToolArgs(msg);
+        const spaceIdx = raw.indexOf(" ");
+        const name = (spaceIdx === -1 ? raw : raw.slice(0, spaceIdx)).trim();
+        const argsRaw = spaceIdx === -1 ? "" : raw.slice(spaceIdx + 1);
+        if (!name) {
+            this.conn.reply(msg, "Usage: !tool <name> [key=value ...]");
+            return;
+        }
+        const [args, error] = parseToolArgs(argsRaw);
+        if (error) {
+            this.conn.reply(msg, error);
+            return;
+        }
+        const result = await this.agent.runTool(name, args);
+        this.conn.reply(msg, result);
+    };
+
+    private onCommandToolStatus = (
+        sender: API_Character,
+        msg: BC_Server_ChatRoomMessage,
+    ): void => {
+        if (!this.isSuperuser(sender)) {
+            this.conn.reply(msg, "Not authorized.");
+            return;
+        }
+        this.conn.reply(msg, this.agent.getToolStatus());
+    };
 
     private onCommandStart = (
         sender: API_Character,
