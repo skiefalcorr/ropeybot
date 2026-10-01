@@ -110,6 +110,8 @@ export const createRoomTool: Tool = {
                 );
         };
 
+        // The server rejects create requests that include Access/Visibility
+        // (InvalidRoomData), so only send them when explicitly requested.
         const roomDef: RoomDefinition = {
             Name: name,
             Description:
@@ -124,8 +126,6 @@ export const createRoomTool: Tool = {
                 typeof args.private === "boolean" ? args.private : base.Private,
             Locked:
                 typeof args.locked === "boolean" ? args.locked : base.Locked,
-            Access: parseRoles(args.access, base.Access ?? ["All"]),
-            Visibility: parseRoles(args.visibility, base.Visibility ?? ["All"]),
             Space:
                 typeof args.space === "string"
                     ? (args.space as RoomDefinition["Space"])
@@ -143,6 +143,12 @@ export const createRoomTool: Tool = {
                     ? (args.language as RoomDefinition["Language"])
                     : base.Language,
         };
+        if (typeof args.access === "string" && args.access.trim()) {
+            roomDef.Access = parseRoles(args.access, ["All"]);
+        }
+        if (typeof args.visibility === "string" && args.visibility.trim()) {
+            roomDef.Visibility = parseRoles(args.visibility, ["All"]);
+        }
 
         const ok = await ctx.conn.ChatRoomCreate(roomDef);
         if (!ok) {

@@ -71,7 +71,7 @@ export const updateRoomTool: Tool = {
             },
         },
     ),
-    handler: (args, ctx) => {
+    handler: async (args, ctx) => {
         const room = ctx.conn.chatRoom;
         if (!room) return "Error: not in a room.";
         const adminErr = requireRoomAdmin(ctx);
@@ -79,7 +79,7 @@ export const updateRoomTool: Tool = {
         const limited = checkRateLimit(ctx);
         if (limited) return limited;
 
-        // Use current room data as the base, then apply overrides.
+        // Send the full current room data as a base, then apply overrides.
         const base = room.ToInfo();
         const update: Record<string, unknown> = {
             Description: base.Description,
@@ -90,6 +90,10 @@ export const updateRoomTool: Tool = {
             Game: base.Game,
             Language: base.Language,
             BlockCategory: [...base.BlockCategory],
+            Space: base.Space,
+            Whitelist: [...base.Whitelist],
+            Ban: [...base.Ban],
+            Admin: [...base.Admin],
         };
 
         const parseRoles = (value: string): string[] =>
@@ -98,35 +102,51 @@ export const updateRoomTool: Tool = {
                 .map((s) => s.trim())
                 .filter((s) => (ROLES as readonly string[]).includes(s));
 
+        const changed: string[] = [];
         if (typeof args.description === "string") {
             update.Description = args.description;
+            changed.push("Description");
         }
         if (typeof args.background === "string") {
             update.Background = args.background;
+            changed.push("Background");
         }
         if (typeof args.limit === "number") {
             update.Limit = args.limit;
+            changed.push("Limit");
         }
         if (typeof args.game === "string") {
             update.Game = args.game;
+            changed.push("Game");
         }
         if (typeof args.language === "string") {
             update.Language = args.language;
+            changed.push("Language");
         }
         if (typeof args.access === "string") {
             update.Access = parseRoles(args.access);
+            changed.push("Access");
         }
         if (typeof args.visibility === "string") {
             update.Visibility = parseRoles(args.visibility);
+            changed.push("Visibility");
         }
         if (typeof args.blockCategory === "string") {
             update.BlockCategory = args.blockCategory
                 .split(",")
                 .map((s) => s.trim())
                 .filter((s) => s.length > 0);
+            changed.push("BlockCategory");
         }
 
-        ctx.conn.ChatRoomUpdate(update as never);
-        return `Updated room '${room.Name}': ${Object.keys(update).join(", ")}.`;
+        if (changed.length === 0) {
+            return "Error: no fields provided to update.";
+        }
+
+        const result = await ctx.conn.ChatRoomUpdate(update as never);
+        if (result === "Updated") {
+            return `Updated room '${room.Name}': ${changed.join(", ")}.`;
+        }
+        return `Error: server rejected the room update (${result}).`;
     },
 };

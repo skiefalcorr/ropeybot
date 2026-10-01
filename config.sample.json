@@ -66,6 +66,8 @@
         "protectedMembers": [],
         "startPose": [],
         "_llmLog": "Optional file path (e.g. \"llm.log\"). When set, every full LLM request (complete prompt) and response (content, tool calls, token usage) is appended to that file as JSONL. llama-server's own log is either an overview or per-token, so this captures the in-between.",
-        "llmLog": ""
+        "llmLog": "",
+        "_debugPort": "Optional local port (e.g. 9377). When set, a debug HTTP server binds to 127.0.0.1:<port> with endpoints: GET /status, GET /tools, POST /tool {name, args}, GET /toollog?limit=N, GET /llmlog?limit=N, POST /stop. For driving/inspecting the bot programmatically while it runs live.",
+        "debugPort": 0
     }
 }

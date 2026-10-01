@@ -24,7 +24,7 @@ export const sendMessageTool: Tool = {
     name: "sendMessage",
     definition: def(
         "sendMessage",
-        "Send a message to the room or to a specific character. Use type 'Chat' for public speech, 'Emote' for actions (rendered as *...*), or 'Whisper' for private messages (requires memberNumber).",
+        "Send a message to the room or to a specific character. Use type 'Chat' for public speech, 'Emote' for actions (rendered as *...*), or 'Whisper' for private messages (requires memberNumber). Try to keep them short, up to 15 words each.",
         {
             type: {
                 type: "string",

@@ -89,6 +89,13 @@ export interface LLMConfig {
      * overview or per-token, so this captures the in-between.
      */
     llmLog?: string;
+    /**
+     * Optional local port for the debug HTTP server. When set, the bot listens
+     * on 127.0.0.1:<port> and exposes /status, /tools, /tool, /toollog,
+     * /llmlog and /stop so the bot can be driven and inspected programmatically
+     * while running against the live server.
+     */
+    debugPort?: number;
     /** Optional starting pose(s) applied to the bot itself on init. */
     startPose?: string[];
     /**

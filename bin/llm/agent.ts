@@ -45,6 +45,18 @@ const LOOKUP_TOOLS = ["listItems", "listClothing", "listPoses"];
  *  - Rate limiting: global actions-per-minute + per-target cooldown,
  *    enforced inside the tool handlers.
  */
+/**
+ * A single recorded tool invocation (LLM-driven or manual), kept in a
+ * ring buffer for the debug server's /toollog endpoint.
+ */
+export interface ToolLogEntry {
+    ts: string;
+    source: "llm" | "manual";
+    name: string;
+    args: Record<string, unknown>;
+    result: string;
+}
+
 export class LLMAgent {
     private client: LLMClient;
     private tools: Tool[];
@@ -52,6 +64,8 @@ export class LLMAgent {
     private ctx: ToolContext;
     private contextBuilder: ContextBuilder;
     private logger: LLMLogger | undefined;
+    /** Last 50 tool invocations (LLM or manual), oldest first. */
+    private toolLog: ToolLogEntry[] = [];
 
     private pendingEvents: string[] = [];
     private debounceTimer: NodeJS.Timeout | undefined;
@@ -328,6 +342,7 @@ export class LLMAgent {
                     }
 
                     console.log(`  -> ${resultText.slice(0, 200)}`);
+                    this.recordToolLog("llm", name, args, resultText);
 
                     // Record outgoing messages so the LLM knows what it said.
                     if (name === "sendMessage" && args.content) {
@@ -495,11 +510,42 @@ export class LLMAgent {
         const tool = this.toolMap.get(name);
         if (!tool) return `Error: unknown tool '${name}'.`;
         console.log(`Manual tool call: ${name}(${JSON.stringify(args)})`);
+        let result: string;
         try {
-            return await tool.handler(args, this.ctx);
+            result = await tool.handler(args, this.ctx);
         } catch (e) {
-            return `Error executing ${name}: ${String(e)}`;
+            result = `Error executing ${name}: ${String(e)}`;
         }
+        this.recordToolLog("manual", name, args, result);
+        return result;
+    }
+
+    /**
+     * Append an entry to the tool-invocation ring buffer (max 50 entries).
+     */
+    private recordToolLog(
+        source: "llm" | "manual",
+        name: string,
+        args: Record<string, unknown>,
+        result: string,
+    ): void {
+        this.toolLog.push({
+            ts: new Date().toISOString(),
+            source,
+            name,
+            args,
+            result,
+        });
+        if (this.toolLog.length > 50) {
+            this.toolLog.shift();
+        }
+    }
+
+    /**
+     * The recent tool-invocation log (LLM and manual calls), oldest first.
+     */
+    getToolLog(): ToolLogEntry[] {
+        return [...this.toolLog];
     }
 
     /**

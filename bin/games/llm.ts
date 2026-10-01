@@ -22,6 +22,7 @@ import {
 } from "bc-bot";
 import { LLMConfig, ConfigFile } from "../config";
 import { LLMAgent } from "../llm/agent";
+import { DebugServer } from "../llm/debugServer";
 import { decodeDescription, withBotDisclaimer } from "../llm/context";
 import { parseToolArgs } from "../llm/tools/toolCommand";
 
@@ -55,6 +56,8 @@ export class LLMGame extends LogicBase {
     private originalBio: string | undefined;
     /** Whether init() actually appended the disclaimer (so stop() knows to remove it). */
     private disclaimerAdded = false;
+    /** Local HTTP debug server, present only when llm.debugPort is set. */
+    private debugServer: DebugServer | undefined;
 
     constructor(
         private conn: API_Connector,
@@ -233,6 +236,20 @@ export class LLMGame extends LogicBase {
             }
         }
 
+        // Optional local debug server for programmatic tool testing.
+        const debugPort = this.llmConfig.debugPort;
+        if (debugPort) {
+            this.debugServer = new DebugServer(
+                debugPort,
+                this.agent,
+                this.llmConfig.llmLog,
+                () => {
+                    void this.stop().then(() => process.exit(0));
+                },
+            );
+            this.debugServer.start();
+        }
+
         console.log("LLM bot ready. Persona loaded, agent running.");
     }
 
@@ -359,6 +376,8 @@ export class LLMGame extends LogicBase {
      * Stop the agent and undo the self-setup changes (called on shutdown).
      */
     public async stop(): Promise<void> {
+        this.debugServer?.close();
+        this.debugServer = undefined;
         this.agent.stop();
 
         // Restore the original nickname.

@@ -49,8 +49,10 @@ export interface RoomDefinition {
     Background: string;
     Private?: boolean;
     Locked?: boolean | null;
-    Access: ServerChatRoomRole[];
-    Visibility: ServerChatRoomRole[];
+    // The server rejects create requests that include Access/Visibility
+    // (InvalidRoomData), so they are optional and omitted when not set.
+    Access?: ServerChatRoomRole[];
+    Visibility?: ServerChatRoomRole[];
     Space: ServerChatRoomSpace;
     Admin: number[];
     Ban: number[];
@@ -124,6 +126,8 @@ export class API_Connector extends EventEmitter<ConnectorEvents> {
 
     private roomJoinPromise: PromiseResolve<string> | undefined;
     private roomCreatePromise: PromiseResolve<string> | undefined;
+    private roomUpdatePromise:
+        PromiseResolve<ServerChatRoomUpdateResponse> | undefined;
     private roomSearchPromise:
         PromiseResolve<ServerChatRoomSearchData[]> | undefined;
     private onlineFriendsPromise:
@@ -261,19 +265,30 @@ export class API_Connector extends EventEmitter<ConnectorEvents> {
         }
     }
 
-    public ChatRoomUpdate(update: Partial<API_Chatroom_Data>): void {
+    public async ChatRoomUpdate(
+        update: Partial<API_Chatroom_Data>,
+    ): Promise<ServerChatRoomUpdateResponse | "Timeout"> {
         // @ts-expect-error We make a copy but remove the keys that aren't necessary
         const roomInfo: ServerChatRoomSettings = structuredClone(update);
         delete roomInfo.Character;
+        // Include the room name so the server knows which room to update
+        if (this._chatRoom) {
+            roomInfo.Name = this._chatRoom.Name;
+        }
         const payload: ServerChatRoomAdminUpdateRequest = {
             Action: "Update",
-            // This is the member number being moved, but this is a room update.
-            // The server still rejects it if it's not there though, so make it 0.
             MemberNumber: 0,
             Room: roomInfo,
         };
-        //console.log("Updating chat room", payload);
+        console.log("Updating chat room", JSON.stringify(payload));
+        this.roomUpdatePromise = new PromiseResolve();
         this.chatRoomAdmin(payload);
+        const result = await Promise.race([
+            this.roomUpdatePromise.prom,
+            wait(10000).then(() => "Timeout" as const),
+        ]);
+        this.roomUpdatePromise = undefined;
+        return result;
     }
 
     public chatRoomAdmin(payload: ServerChatRoomAdminRequest) {
@@ -383,6 +398,7 @@ export class API_Connector extends EventEmitter<ConnectorEvents> {
 
     private onChatRoomUpdateResponse = (resp: ServerChatRoomUpdateResponse) => {
         console.log("Got chat room update response", resp);
+        this.roomUpdatePromise?.resolve(resp);
     };
 
     private onChatRoomSync = (resp: ServerChatRoomSyncMessage) => {

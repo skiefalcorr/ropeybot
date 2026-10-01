@@ -155,6 +155,9 @@ function applyIntensity(item: API_AppearanceItem, newIntensity: number): boolean
         try {
             const typeRecord = { ...(prop.TypeRecord as Record<string, number>), v: newIntensity };
             item.setProperty("TypeRecord", typeRecord as never);
+            if (prop.Effect.includes("Vibrating") === false) {
+                prop.Effect.push("Vibrating");
+            }
             return true;
         } catch {
             // fall through

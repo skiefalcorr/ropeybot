@@ -51,16 +51,35 @@ export const leashTool: Tool = {
         const limited = checkRateLimit(ctx, memberNumber);
         if (limited) return limited;
 
+        // Find a leash item in any slot. The static "Leash" effect lives in
+        // the asset definition, not the runtime Property.Effect (which the
+        // server does not populate on sync), so check the asset def.
+        const leashItem = target.Appearance.allItems().find((item) => {
+            const def = item.getAssetDef();
+            return def?.Effect?.includes("Leash") ?? false;
+        });
+        if (!leashItem)
+            return `Error: ${target.Name} has no leash item in any slot.`;
+
         if (action === "hold") {
-            //if (ctx.leashed.has(memberNumber))
-            //return `Already holding ${target.Name}'s leash.`;
+            // Push IsLeashed effect to the server so the client shows the leash
+            const effects = leashItem.getEffects();
+            if (!effects.includes("IsLeashed")) {
+                leashItem.setProperty("Effect", [...effects, "IsLeashed"]);
+            }
             ctx.conn.SendMessage("Hidden", "HoldLeash", memberNumber);
             ctx.leashed.set(memberNumber, Date.now());
             return `Holding ${target.Name}'s leash. They must now follow you.`;
         }
         if (action === "release") {
-            //if (!ctx.leashed.has(memberNumber))
-            //return `Not holding ${target.Name}'s leash.`;
+            // Remove IsLeashed effect
+            const effects = leashItem.getEffects();
+            if (effects.includes("IsLeashed")) {
+                leashItem.setProperty(
+                    "Effect",
+                    effects.filter((e) => e !== "IsLeashed"),
+                );
+            }
             ctx.conn.SendMessage("Hidden", "StopHoldLeash", memberNumber);
             ctx.leashed.delete(memberNumber);
             return `Released ${target.Name}'s leash.`;
