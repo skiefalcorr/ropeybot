@@ -150,8 +150,32 @@ export const createRoomTool: Tool = {
             roomDef.Visibility = parseRoles(args.visibility, ["All"]);
         }
 
+        // Store the current room's definition so we can return to it if the
+        // create fails. Access/Visibility are stripped because the server
+        // rejects create requests that include them (InvalidRoomData).
+        const currentRoom = ctx.conn.chatRoom;
+        const oldRoomDef: RoomDefinition | undefined = currentRoom
+            ? (() => {
+                  const info = currentRoom.ToInfo() as RoomDefinition;
+                  delete info.Access;
+                  delete info.Visibility;
+                  return info;
+              })()
+            : undefined;
+
+        // Leave the current room first so leashed characters follow the bot
+        // into the new room.
+        if (currentRoom) {
+            ctx.conn.ChatRoomLeave();
+        }
+
         const ok = await ctx.conn.ChatRoomCreate(roomDef);
         if (!ok) {
+            // Fall back to the previous room so the bot isn't left stranded.
+            if (oldRoomDef) {
+                await ctx.conn.joinOrCreateRoom(oldRoomDef);
+                return `Failed to create room '${name}'. Returned to '${oldRoomDef.Name}'.`;
+            }
             return `Failed to create room '${name}'. It may already exist or the data was invalid.`;
         }
         return `Created and joined room '${name}'. The bot is an admin of it.`;

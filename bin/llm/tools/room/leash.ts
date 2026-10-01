@@ -62,11 +62,12 @@ export const leashTool: Tool = {
             return `Error: ${target.Name} has no leash item in any slot.`;
 
         if (action === "hold") {
-            // Push IsLeashed effect to the server so the client shows the leash
+            // Push IsLeashed effect to the server so the client shows the leash; maybe redundant
             const effects = leashItem.getEffects();
             if (!effects.includes("IsLeashed")) {
                 leashItem.setProperty("Effect", [...effects, "IsLeashed"]);
             }
+            // Msg that leashes
             ctx.conn.SendMessage("Hidden", "HoldLeash", memberNumber);
             ctx.leashed.set(memberNumber, Date.now());
             return `Holding ${target.Name}'s leash. They must now follow you.`;

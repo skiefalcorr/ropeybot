@@ -226,6 +226,11 @@ export class LLMGame extends LogicBase {
             this.conn.setBotDescription(newBio);
         }
 
+        // Allow other players to leash the bot (required for the leash tool).
+        if (!me.OnlineSharedSettings.AllowPlayerLeashing) {
+            me.allowPlayerLeashing = true;
+        }
+
         // Optional starting pose for the bot itself.
         const startPose = this.llmConfig.startPose;
         if (startPose && startPose.length > 0) {
