@@ -19,13 +19,19 @@ export const listItemsTool: Tool = {
     name: "listItems",
     definition: def(
         "listItems",
-        "List available items (restraints and BDSM gear: gags, cuffs, hoods, devices, etc.) as 'group:asset' names so you can use valid names with addItem/removeItem. Optionally filter by group, fetish tag, or a search term.",
+        "List available items (restraints and BDSM gear: gags, cuffs, hoods, devices, etc.) as 'group:asset' names so you can use valid names with addItem/removeItem. Optionally filter by group, gender, fetish tag, or a search term.",
         {
             group: {
                 type: "string",
                 enum: ITEM_GROUPS,
                 description:
                     "Filter by asset group, e.g. 'ItemMouth', 'ItemNeck', 'ItemArms'",
+            },
+            gender: {
+                type: "string",
+                enum: ["F", "M"],
+                description:
+                    "Only show items this gender can wear: 'F' for female, 'M' for male. Unisex items (no gender) are always included.",
             },
             fetish: {
                 type: "string",
@@ -46,6 +52,7 @@ export const listItemsTool: Tool = {
     ),
     handler: (args) => {
         const group = args.group as string | undefined;
+        const gender = args.gender as "F" | "M" | undefined;
         const fetish = args.fetish as string | undefined;
         const search = (args.search as string | undefined)?.toLowerCase();
         const limit = Math.min(Number(args.limit ?? 100), 200);
@@ -56,6 +63,9 @@ export const listItemsTool: Tool = {
             for (const a of grp.Asset ?? []) {
                 const name = typeof a === "string" ? a : a.Name;
                 const tags = typeof a === "string" ? undefined : a.Fetish;
+                const assetGender = typeof a === "string" ? undefined : a.Gender;
+                if (gender && assetGender !== undefined && assetGender !== gender)
+                    continue;
                 if (fetish && !tags?.includes(fetish)) continue;
                 if (
                     search &&

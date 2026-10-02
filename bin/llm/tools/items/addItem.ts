@@ -106,6 +106,27 @@ export const addItemTool: Tool = {
                 }
             }
 
+            //ChatMsg
+            const botMember = ctx.conn.Player.MemberNumber;
+            const nextAsset: Record<string, unknown> = {
+                Tag: "NextAsset",
+                AssetName: asset,
+                GroupName: group,
+            };
+            if (craftName) nextAsset.CraftName = craftName;
+
+            ctx.conn.SendMessage("Action" as never, "ActionUse", undefined, [
+                { SourceCharacter: botMember },
+                {
+                    Tag: "DestinationCharacter",
+                    MemberNumber: memberNumber,
+                    Text: target.Name,
+                },
+                { TargetCharacter: memberNumber },
+                nextAsset,
+                { Tag: "FocusAssetGroup", FocusGroupName: group },
+            ]);
+
             return `Added ${group}:${asset} to ${target.Name}.`;
         } catch (e) {
             return `Error adding item: ${String(e)}`;

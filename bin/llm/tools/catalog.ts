@@ -28,7 +28,14 @@ export interface CatalogGroup {
     Clothing?: boolean;
     AllowNone?: boolean;
     Asset?: (
-        string | { Name: string; Fetish?: string[]; [k: string]: unknown }
+        | string
+        | {
+              Name: string;
+              Fetish?: string[];
+              /** 'M' = male-only, 'F' = female-only, undefined = unisex. */
+              Gender?: "F" | "M";
+              [k: string]: unknown;
+          }
     )[];
 }
 

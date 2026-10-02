@@ -52,6 +52,25 @@ export const removeItemTool: Tool = {
         const limited = checkRateLimit(ctx, memberNumber);
         if (limited) return limited;
         target.Appearance.RemoveItem(group as never);
+
+        //chat msg
+        const botMember = ctx.conn.Player.MemberNumber;
+        ctx.conn.SendMessage("Action" as never, "ActionRemove", undefined, [
+            { SourceCharacter: botMember },
+            {
+                Tag: "DestinationCharacter",
+                MemberNumber: memberNumber,
+                Text: target.Name,
+            },
+            { TargetCharacter: memberNumber },
+            {
+                Tag: "PrevAsset",
+                AssetName: existing.getData().Name,
+                GroupName: group,
+            },
+            { Tag: "FocusAssetGroup", FocusGroupName: group },
+        ]);
+
         return `Removed ${group} from ${target.Name}.`;
     },
 };
