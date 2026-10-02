@@ -16,6 +16,7 @@ import {
     API_Connector,
     API_Character,
     BC_Server_ChatRoomMessage,
+    type RoomDefinition,
 } from "bc-bot";
 import { LLMClient, LLMChatOptions, LLMMessage } from "./llmClient";
 import { buildTools, resolveTools, Tool, ToolContext } from "./tools";
@@ -44,6 +45,18 @@ const LOOKUP_TOOLS = ["listItems", "listClothing", "listPoses"];
  *  - Rate limiting: global actions-per-minute + per-target cooldown,
  *    enforced inside the tool handlers.
  */
+/**
+ * A single recorded tool invocation (LLM-driven or manual), kept in a
+ * ring buffer for the debug server's /toollog endpoint.
+ */
+export interface ToolLogEntry {
+    ts: string;
+    source: "llm" | "manual";
+    name: string;
+    args: Record<string, unknown>;
+    result: string;
+}
+
 export class LLMAgent {
     private client: LLMClient;
     private tools: Tool[];
@@ -51,6 +64,8 @@ export class LLMAgent {
     private ctx: ToolContext;
     private contextBuilder: ContextBuilder;
     private logger: LLMLogger | undefined;
+    /** Last 50 tool invocations (LLM or manual), oldest first. */
+    private toolLog: ToolLogEntry[] = [];
 
     private pendingEvents: string[] = [];
     private debounceTimer: NodeJS.Timeout | undefined;
@@ -58,11 +73,15 @@ export class LLMAgent {
     private debounceStartedAt = 0;
     private running = false;
     private stopped = false;
+    private emoticonMissingWarned = false;
+    /** Last emoticon actually sent to the server (avoids redundant updates). */
+    private currentEmoticon: "Hearing" | "Coding" | "Wardrobe" | null = null;
 
     constructor(
         private conn: API_Connector,
         private config: LLMConfig,
         private superusers: number[],
+        private room: RoomDefinition,
     ) {
         this.client = new LLMClient(
             config.url,
@@ -77,6 +96,7 @@ export class LLMAgent {
         this.ctx = {
             conn,
             config,
+            room,
             protectedMembers: [
                 ...superusers,
                 ...(config.protectedMembers ?? []),
@@ -133,6 +153,12 @@ export class LLMAgent {
         if (this.debounceStartedAt === 0) {
             this.debounceStartedAt = now;
         }
+        // Feedback: we are accumulating events, waiting for the room to go
+        // quiet. Only shown when idle — a running turn keeps its own
+        // "Coding"/"Wardrobe" emoticon.
+        if (!this.running) {
+            this.setEmoticon("Hearing");
+        }
 
         const debounceMs = this.config.debounceMs ?? 1500;
         const maxWaitMs = this.config.debounceMaxWaitMs ?? 5000;
@@ -166,6 +192,14 @@ export class LLMAgent {
         } finally {
             this.running = false;
             // If new events arrived while we were running, run another turn.
+            // Drop the timer armed mid-turn and start a FRESH debounce
+            // window, so the next turn waits out a full debounce delay
+            // instead of firing immediately.
+            if (this.debounceTimer) {
+                clearTimeout(this.debounceTimer);
+                this.debounceTimer = undefined;
+            }
+            this.debounceStartedAt = 0;
             if (this.pendingEvents.length > 0 && !this.stopped) {
                 this.scheduleTurn();
             }
@@ -220,103 +254,158 @@ export class LLMAgent {
 
         this.logger?.newTurn();
 
-        for (let i = 0; i < maxIterations; i++) {
-            let result;
-            this.logger?.logRequest(messages, chatOptions);
-            const t0 = Date.now();
-            try {
-                result = await this.client.chat(messages, chatOptions);
-            } catch (e) {
-                console.error("LLM chat error:", e);
-                this.logger?.logError(String(e));
-                return;
-            }
-            this.logger?.logResponse(result, Date.now() - t0);
+        // Whether the previous tool batch contained a lookup tool; decides
+        // which "thinking" emoticon to show before the next LLM call.
+        let prevBatchHadLookup = false;
 
-            // Plain text response: send it to the room and finish.
-            if (result.content && result.content.trim()) {
-                const text = result.content.trim();
-                this.conn.SendMessage("Chat", text);
-                this.contextBuilder.recordOutgoing("Chat", text);
-                return;
-            }
+        try {
+            for (let i = 0; i < maxIterations; i++) {
+                // Feedback: "Wardrobe" while deciding what to do with lookup
+                // results, "Coding" while generating normally.
+                this.setEmoticon(prevBatchHadLookup ? "Wardrobe" : "Coding");
 
-            // No content and no tool calls: nothing to do.
-            if (result.toolCalls.length === 0) {
-                return;
-            }
+                let result;
+                this.logger?.logRequest(messages, chatOptions);
+                const t0 = Date.now();
+                try {
+                    result = await this.client.chat(messages, chatOptions);
+                } catch (e) {
+                    console.error("LLM chat error:", e);
+                    this.logger?.logError(String(e));
+                    return;
+                }
+                this.logger?.logResponse(result, Date.now() - t0);
 
-            // Append the assistant message with tool calls.
-            messages.push({
-                role: "assistant",
-                content: null,
-                tool_calls: result.toolCalls,
-            });
-
-            // Execute each tool call and append the results.
-            // If endTurn is chained with a lookup tool (listItems etc.) in the
-            // same batch, ignore it and remind the model to act first.
-            const batchNames = new Set(
-                result.toolCalls.map((c) => c.function.name),
-            );
-            const hasLookup = LOOKUP_TOOLS.some((t) => batchNames.has(t));
-            let endTurnRequested = false;
-            for (const call of result.toolCalls) {
-                const name = call.function.name;
-                const tool = this.toolMap.get(name);
-                const args = LLMClient.parseToolArgs(call.function.arguments);
-                let resultText: string;
-
-                if (!tool) {
-                    resultText = `Error: unknown tool '${name}'.`;
-                } else {
-                    console.log(
-                        `LLM tool call: ${name}(${JSON.stringify(args)})`,
-                    );
-                    try {
-                        resultText = await tool.handler(args, this.ctx);
-                    } catch (e) {
-                        resultText = `Error executing ${name}: ${String(e)}`;
-                    }
+                // Plain text response: send it to the room and finish.
+                if (result.content && result.content.trim()) {
+                    const text = result.content.trim();
+                    this.conn.SendMessage("Chat", text);
+                    this.contextBuilder.recordOutgoing("Chat", text);
+                    return;
                 }
 
-                console.log(`  -> ${resultText.slice(0, 200)}`);
-
-                // Record outgoing messages so the LLM knows what it said.
-                if (name === "sendMessage" && args.content) {
-                    this.contextBuilder.recordOutgoing(
-                        String(args.type ?? "Chat"),
-                        String(args.content),
-                    );
+                // No content and no tool calls: nothing to do.
+                if (result.toolCalls.length === 0) {
+                    return;
                 }
 
-                if (name === "endTurn") {
-                    if (hasLookup) {
-                        resultText =
-                            "endTurn ignored: you called a lookup tool (listItems/listClothing/listPoses) in this batch. Perform your intended action first, then call endTurn.";
-                        console.log(`  -> ${resultText}`);
-                    } else {
-                        endTurnRequested = true;
-                    }
-                }
-
+                // Append the assistant message with tool calls. Echo back
+                // the model's reasoning_content so it keeps its
+                // chain-of-thought across this turn's iterations. (The
+                // messages array is rebuilt on every turn, so reasoning
+                // never leaks between turns.)
                 messages.push({
-                    role: "tool",
-                    tool_call_id: call.id,
-                    name,
-                    content: resultText,
+                    role: "assistant",
+                    content: null,
+                    tool_calls: result.toolCalls,
+                    ...(result.reasoningContent
+                        ? { reasoning_content: result.reasoningContent }
+                        : {}),
                 });
+
+                // Execute each tool call and append the results.
+                // If endTurn is chained with a lookup tool (listItems etc.) in the
+                // same batch, ignore it and remind the model to act first.
+                const batchNames = new Set(
+                    result.toolCalls.map((c) => c.function.name),
+                );
+                const hasLookup = LOOKUP_TOOLS.some((t) => batchNames.has(t));
+                let endTurnRequested = false;
+                const toolCallDelayMs = this.config.toolCallDelayMs ?? 150;
+                for (let i = 0; i < result.toolCalls.length; i++) {
+                    // Small pause between tool calls so the game server
+                    // receives the resulting messages in a stable order.
+                    if (i > 0 && toolCallDelayMs > 0) {
+                        await new Promise((r) =>
+                            setTimeout(r, toolCallDelayMs * i),
+                        );
+                    }
+                    const call = result.toolCalls[i];
+                    const name = call.function.name;
+                    const tool = this.toolMap.get(name);
+                    const args = LLMClient.parseToolArgs(
+                        call.function.arguments,
+                    );
+                    let resultText: string;
+
+                    if (!tool) {
+                        resultText = `Error: unknown tool '${name}'.`;
+                    } else {
+                        console.log(
+                            `LLM tool call: ${name}(${JSON.stringify(args)})`,
+                        );
+                        try {
+                            resultText = await tool.handler(args, this.ctx);
+                        } catch (e) {
+                            resultText = `Error executing ${name}: ${String(e)}`;
+                        }
+                    }
+
+                    console.log(`  -> ${resultText.slice(0, 200)}`);
+                    this.recordToolLog("llm", name, args, resultText);
+
+                    // Record outgoing messages so the LLM knows what it said.
+                    if (name === "sendMessage" && args.content) {
+                        this.contextBuilder.recordOutgoing(
+                            String(args.type ?? "Chat"),
+                            String(args.content),
+                        );
+                    }
+
+                    if (name === "endTurn") {
+                        if (hasLookup) {
+                            resultText =
+                                "endTurn ignored: you called a lookup tool (listItems/listClothing/listPoses) in this batch. Perform your intended action first, then call endTurn.";
+                            console.log(`  -> ${resultText}`);
+                        } else {
+                            endTurnRequested = true;
+                        }
+                    }
+
+                    messages.push({
+                        role: "tool",
+                        tool_call_id: call.id,
+                        name,
+                        content: resultText,
+                    });
+                }
+
+                // If the model called endTurn, stop the loop.
+                if (endTurnRequested) {
+                    return;
+                }
+
+                prevBatchHadLookup = hasLookup;
             }
 
-            // If the model called endTurn, stop the loop.
-            if (endTurnRequested) {
-                return;
-            }
+            console.warn(
+                `LLM agent hit max tool iterations (${maxIterations}) without a final message.`,
+            );
+        } finally {
+            // Idle: clear the feedback emoticon on every exit path.
+            this.setEmoticon(null);
         }
+    }
 
-        console.warn(
-            `LLM agent hit max tool iterations (${maxIterations}) without a final message.`,
-        );
+    /**
+     * Set the bot's Emoticon as a working-state indicator
+     * (Hearing = accumulating events, Coding = generating,
+     * Wardrobe = acting on lookup results, null = idle).
+     */
+    private setEmoticon(expr: "Hearing" | "Coding" | "Wardrobe" | null): void {
+        if (expr === this.currentEmoticon) return;
+        this.currentEmoticon = expr;
+        const me = this.conn.Player;
+        if (!me.Appearance.InventoryGet("Emoticon")) {
+            if (!this.emoticonMissingWarned) {
+                this.emoticonMissingWarned = true;
+                console.warn(
+                    "Bot has no Emoticon item; working-state emoticons disabled.",
+                );
+            }
+            return;
+        }
+        me.SetExpression("Emoticon", expr);
     }
 
     /**
@@ -370,6 +459,16 @@ export class LLMAgent {
     }
 
     /**
+     * Remove a character from the leashed map without sending StopHoldLeash.
+     * Used when the character removes the leash themselves (RemoveLeash
+     * Hidden message) — the leash is already gone, we just need to stop
+     * tracking them so we don't ping a released character.
+     */
+    dropLeash(memberNumber: number): void {
+        this.ctx.leashed.delete(memberNumber);
+    }
+
+    /**
      * Add or remove a character from the participant set. Removing a
      * participant also releases their leash if held.
      */
@@ -396,6 +495,92 @@ export class LLMAgent {
         return [...this.ctx.participants];
     }
 
+    /**
+     * Look up a tool by name (for the in-game `!tool` test command).
+     */
+    getTool(name: string): Tool | undefined {
+        return this.toolMap.get(name);
+    }
+
+    /**
+     * All tools the LLM is allowed to use (after allowed/denied filtering).
+     */
+    getTools(): Tool[] {
+        return this.tools;
+    }
+
+    /**
+     * Execute a tool directly, bypassing the LLM. Returns the tool's result
+     * string, or an error string if the tool is unknown or throws.
+     */
+    async runTool(
+        name: string,
+        args: Record<string, unknown>,
+    ): Promise<string> {
+        const tool = this.toolMap.get(name);
+        if (!tool) return `Error: unknown tool '${name}'.`;
+        console.log(`Manual tool call: ${name}(${JSON.stringify(args)})`);
+        let result: string;
+        try {
+            result = await tool.handler(args, this.ctx);
+        } catch (e) {
+            result = `Error executing ${name}: ${String(e)}`;
+        }
+        this.recordToolLog("manual", name, args, result);
+        return result;
+    }
+
+    /**
+     * Append an entry to the tool-invocation ring buffer (max 50 entries).
+     */
+    private recordToolLog(
+        source: "llm" | "manual",
+        name: string,
+        args: Record<string, unknown>,
+        result: string,
+    ): void {
+        this.toolLog.push({
+            ts: new Date().toISOString(),
+            source,
+            name,
+            args,
+            result,
+        });
+        if (this.toolLog.length > 50) {
+            this.toolLog.shift();
+        }
+    }
+
+    /**
+     * The recent tool-invocation log (LLM and manual calls), oldest first.
+     */
+    getToolLog(): ToolLogEntry[] {
+        return [...this.toolLog];
+    }
+
+    /**
+     * A short human-readable snapshot of the agent's state, for the
+     * `!toolstatus` command.
+     */
+    getToolStatus(): string {
+        const now = Date.now();
+        const windowMs = 60_000;
+        const recentActions = this.ctx.actionTimestamps.filter(
+            (t) => t >= now - windowMs,
+        ).length;
+        const maxPerMinute = this.config.maxActionsPerMinute ?? 10;
+        const suspended = [...this.ctx.suspended.entries()]
+            .filter(([, until]) => until > now)
+            .map(([n, until]) => `${n} (${Math.ceil((until - now) / 1000)}s)`);
+        const leashed = [...this.ctx.leashed.keys()];
+        return [
+            `Participants: ${this.getParticipants().join(", ") || "(none)"}`,
+            `Rate limit: ${recentActions}/${maxPerMinute} actions in the last minute`,
+            `Suspended (safeword): ${suspended.join(", ") || "(none)"}`,
+            `Leashed: ${leashed.join(", ") || "(none)"}`,
+        ].join("\n");
+    }
+
     stop(): void {
         this.stopped = true;
         if (this.debounceTimer) {
@@ -403,6 +588,7 @@ export class LLMAgent {
             this.debounceTimer = undefined;
         }
         this.debounceStartedAt = 0;
+        this.setEmoticon(null);
         this.logger?.close();
     }
 }

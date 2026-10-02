@@ -55,11 +55,11 @@ export function transformToCharacterData(
     const defaultOnlineSettings: CharacterOnlineSharedSettings = {
         AllowFullWardrobeAccess: false,
         BlockBodyCosplay: false,
-        AllowPlayerLeashing: false,
+        AllowPlayerLeashing: true,
         AllowRename: false,
         DisablePickingLocksOnSelf: false,
         GameVersion: "",
-        ItemsAffectExpressions: false,
+        ItemsAffectExpressions: true,
         ScriptPermissions: {
             Hide: {
                 permission: 0,

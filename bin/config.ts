@@ -24,6 +24,11 @@ import { type CasinoConfig } from "./games/casino";
 export interface LLMConfig {
     /** Base URL of llama-server, e.g. "http://localhost:8080". */
     url: string;
+    /**
+     * Display name of the bot, used in the bio disclaimer so players can
+     * tell it's an AI. If omitted, the bot's nickname is used.
+     */
+    botName?: string;
     /** Model name as served by llama-server. Optional; defaults to the loaded model. */
     model?: string;
     /** API key, if llama-server was started with --api-key. Optional. */
@@ -37,8 +42,18 @@ export interface LLMConfig {
     allowedTools?: string[];
     /** Blacklist of tool names the LLM must never use (e.g. destructive admin tools). */
     deniedTools?: string[];
+    /**
+     * Enable the room-management tools (searchRooms, roomInfo, joinRoom,
+     * leaveRoom, createRoom, updateRoom, roomAdmin). @default true
+     */
+    roomTools?: boolean;
     /** Max tool-call iterations per agent turn. @default 5 */
     maxToolIterations?: number;
+    /**
+     * Delay (ms) between consecutive tool calls in a batch, so the game
+     * server receives the resulting messages in a stable order. @default 150
+     */
+    toolCallDelayMs?: number;
     /** Debounce window (ms) before an LLM turn is triggered after events. @default 1500 */
     debounceMs?: number;
     /**
@@ -74,6 +89,13 @@ export interface LLMConfig {
      * overview or per-token, so this captures the in-between.
      */
     llmLog?: string;
+    /**
+     * Optional local port for the debug HTTP server. When set, the bot listens
+     * on 127.0.0.1:<port> and exposes /status, /tools, /tool, /toollog,
+     * /llmlog and /stop so the bot can be driven and inspected programmatically
+     * while running against the live server.
+     */
+    debugPort?: number;
     /** Optional starting pose(s) applied to the bot itself on init. */
     startPose?: string[];
     /**

@@ -282,6 +282,17 @@ export class API_Chatroom extends EventEmitter<ChatRoomEvents> {
 
         char.update(charData);
 
+        // Keep the cached room data in sync with the character object.
+        // characterFromCache() re-applies this.data.Character entries on
+        // every access, so leaving it stale would revert the character to
+        // its pre-sync state on the next read.
+        const dataEntry = this.data.Character.find(
+            (c) => c.MemberNumber === memberNumber,
+        );
+        if (dataEntry) {
+            Object.assign(dataEntry, charData);
+        }
+
         const removed: API_AppearanceItem[] = [];
         for (const oldItem of oldItems) {
             if (

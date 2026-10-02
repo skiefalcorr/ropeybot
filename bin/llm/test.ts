@@ -40,6 +40,7 @@ const SAFE_TOOLS = new Set(["listItems", "listClothing", "listPoses"]);
 const stubCtx: ToolContext = {
     conn: undefined as never,
     config: { url: LLM_URL, persona: "test" },
+    room: undefined as never,
     protectedMembers: [],
     suspended: new Map(),
     actionTimestamps: [],
