@@ -193,11 +193,6 @@ export const setVibratorTool: Tool = {
             mode: {
                 type: "string",
                 enum: [
-                    "Off",
-                    "Low",
-                    "Medium",
-                    "High",
-                    "Maximum",
                     "Random",
                     "Escalate",
                     "Tease",
@@ -205,7 +200,7 @@ export const setVibratorTool: Tool = {
                     "Edge",
                 ],
                 description:
-                    "Vibrator mode, e.g. 'High', 'Escalate', 'Tease', 'Deny', 'Edge'",
+                    "Vibrator mode, e.g. 'Random', 'Escalate', 'Tease', 'Deny', 'Edge'",
             },
         },
         ["memberNumber", "group"],
@@ -239,14 +234,46 @@ export const setVibratorTool: Tool = {
 
         const before = vibratorState(item);
 
+        const botMember = ctx.conn.Player.MemberNumber;
+        const assetEntry: Record<string, unknown> = {
+            Tag: "AssetName",
+            AssetName: item.Name,
+            GroupName: group,
+        };
+        const destinationEntry = {
+            Tag: "DestinationCharacter",
+            MemberNumber: memberNumber,
+            Text: target.Name,
+        };
+
         // Apply intensity (numeric level)
         if (intensity !== undefined) {
             applyIntensity(item, intensity);
+            ctx.conn.SendMessage(
+                "Action" as never,
+                `VibeModeActionIncreaseTo${intensity}`,
+                undefined,
+                [
+                    { SourceCharacter: botMember },
+                    destinationEntry,
+                    assetEntry,
+                ],
+            );
         }
 
         // Apply mode (named mode like Escalate, Tease, etc.)
         if (mode !== undefined) {
             item.setProperty("Mode", mode as never);
+            ctx.conn.SendMessage(
+                "Action" as never,
+                `VibeModeAction${mode}`,
+                undefined,
+                [
+                    { SourceCharacter: botMember },
+                    destinationEntry,
+                    assetEntry,
+                ],
+            );
         }
 
         const after = vibratorState(item);
