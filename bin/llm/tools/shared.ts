@@ -171,3 +171,21 @@ export function checkRateLimit(
     }
     return null;
 }
+
+/**
+ * Ping all leashed characters so they follow the bot into the current room.
+ *
+ * The game client does this automatically when a player changes rooms
+ * (ChatRoomPingLeashedPlayers). The bot must replicate it: for each member
+ * in ctx.leashed, send PingHoldLeash (Hidden) and AccountBeep("Leash").
+ * The server fills in the sender's current room in the beep response, so
+ * the leashed client joins the bot's new room.
+ *
+ * Must be called AFTER the bot has successfully joined/created the new room.
+ */
+export function pingLeashed(ctx: ToolContext): void {
+    for (const memberNumber of ctx.leashed.keys()) {
+        ctx.conn.SendMessage("Hidden", "PingHoldLeash", memberNumber);
+        ctx.conn.AccountBeep(memberNumber, "Leash");
+    }
+}

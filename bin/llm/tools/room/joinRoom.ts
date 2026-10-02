@@ -12,7 +12,7 @@
  * limitations under the License.
  */
 
-import { Tool, def, checkRateLimit } from "../shared";
+import { Tool, def, checkRateLimit, pingLeashed } from "../shared";
 
 export const joinRoomTool: Tool = {
     name: "joinRoom",
@@ -44,6 +44,8 @@ export const joinRoomTool: Tool = {
         if (!ok) {
             return `Failed to join room '${name}'. It may be locked, full, or not exist.`;
         }
+        // Ping leashed characters so they follow the bot into the new room.
+        pingLeashed(ctx);
         return `Joined room '${name}'.`;
     },
 };

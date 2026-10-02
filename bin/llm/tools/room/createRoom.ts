@@ -13,7 +13,7 @@
  */
 
 import { type RoomDefinition } from "bc-bot";
-import { Tool, def, checkRateLimit } from "../shared";
+import { Tool, def, checkRateLimit, pingLeashed } from "../shared";
 
 const SPACES = ["X", "M", "Asylum", ""] as const;
 const GAMES = [
@@ -178,6 +178,8 @@ export const createRoomTool: Tool = {
             }
             return `Failed to create room '${name}'. It may already exist or the data was invalid.`;
         }
+        // Ping leashed characters so they follow the bot into the new room.
+        pingLeashed(ctx);
         return `Created and joined room '${name}'. The bot is an admin of it.`;
     },
 };

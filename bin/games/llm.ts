@@ -16,6 +16,7 @@ import {
     API_Connector,
     API_Character,
     AnyCharacterEvent,
+    AnyLogicEvent,
     BC_Server_ChatRoomMessage,
     CommandParser,
     LogicBase,
@@ -258,6 +259,29 @@ export class LLMGame extends LogicBase {
         console.log("LLM bot ready. Persona loaded, agent running.");
     }
 
+    /**
+     * Handle incoming logic events. We only care about Leash beeps: when a
+     * character leashes the bot and then changes rooms, the server sends a
+     * "Leash" beep carrying the character's new room. The bot follows by
+     * joining that room (mirroring the game client's ServerHandleLeashBeep).
+     */
+    public onEvent(ev: AnyLogicEvent): void {
+        if (ev.name !== "Beep") return;
+        const beep = ev.beep;
+        if (beep.BeepType !== "Leash") return;
+        // Ignore beeps from the bot itself.
+        if (beep.MemberNumber === this.conn.Player.MemberNumber) return;
+        const roomName = beep.ChatRoomName;
+        if (!roomName) return;
+        const current = this.conn.chatRoom;
+        if (current && current.Name === roomName) return;
+        console.log(
+            `Leash beep from ${beep.MemberName} (${beep.MemberNumber}): following to room '${roomName}'`,
+        );
+        this.conn.ChatRoomLeave();
+        void this.conn.ChatRoomJoin(roomName);
+    }
+
     protected onMessage(
         connection: API_Connector,
         message: BC_Server_ChatRoomMessage,
@@ -267,6 +291,16 @@ export class LLMGame extends LogicBase {
 
         // Ignore our own messages (the server echoes them back).
         if (sender.MemberNumber === me.MemberNumber) return;
+
+        // If a character removes the leash they were holding on the bot,
+        // drop them from the leashed map so we stop pinging them.
+        if (
+            message.Type === "Hidden" &&
+            message.Content === "RemoveLeash"
+        ) {
+            this.agent.dropLeash(sender.MemberNumber);
+            return;
+        }
 
         // Ignore non-text message types.
         if (

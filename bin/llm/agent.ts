@@ -459,6 +459,16 @@ export class LLMAgent {
     }
 
     /**
+     * Remove a character from the leashed map without sending StopHoldLeash.
+     * Used when the character removes the leash themselves (RemoveLeash
+     * Hidden message) — the leash is already gone, we just need to stop
+     * tracking them so we don't ping a released character.
+     */
+    dropLeash(memberNumber: number): void {
+        this.ctx.leashed.delete(memberNumber);
+    }
+
+    /**
      * Add or remove a character from the participant set. Removing a
      * participant also releases their leash if held.
      */

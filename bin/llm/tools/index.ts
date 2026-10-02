@@ -26,6 +26,7 @@ import { removeItemTool } from "./items/removeItem";
 import { stripAllTool } from "./items/stripAll";
 import { lockItemTool } from "./modification/lockItem";
 import { setVibratorTool } from "./modification/setVibrator";
+import { sendShockTool } from "./modification/sendShock";
 import { setPoseTool } from "./body/setPose";
 import { setExpressionTool } from "./body/setExpression";
 import { leashTool } from "./room/leash";
@@ -60,6 +61,8 @@ export function buildTools(): Tool[] {
         lockItemTool,
         // Vibrator control
         setVibratorTool,
+        // Shock control
+        sendShockTool,
         // Movement (self)
         moveSelfTool,
         // Turn control
