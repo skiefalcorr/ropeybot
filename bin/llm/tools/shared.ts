@@ -83,6 +83,30 @@ export function displayName(char: API_Character): string {
     return char.NickName.length > 0 ? char.NickName : char.Name;
 }
 
+export interface PronounSet {
+    /** Possessive determiner, e.g. "her" / "his". */
+    possessive: string;
+    /** Reflexive pronoun, e.g. "herself" / "himself". */
+    self: string;
+    /** Object pronoun, e.g. "her" / "him". */
+    object: string;
+}
+
+/**
+ * Resolve a character's pronouns for use in rendered activity text. Gender is
+ * inferred from the character's appearance: a character with a penis is treated
+ * as male, otherwise female. Returns a neutral set if the character is unknown.
+ */
+export function pronounsFor(
+    char: API_Character | undefined,
+): PronounSet {
+    if (!char) return { possessive: "their", self: "themselves", object: "them" };
+    if (char.hasPenis()) {
+        return { possessive: "his", self: "himself", object: "him" };
+    }
+    return { possessive: "her", self: "herself", object: "her" };
+}
+
 export function findCharacter(
     conn: API_Connector,
     args: Record<string, unknown>,

@@ -27,6 +27,11 @@ import { DebugServer } from "../llm/debugServer";
 import { decodeDescription, withBotDisclaimer } from "../llm/context";
 import { parseToolArgs } from "../llm/tools/toolCommand";
 import { displayName } from "../llm/tools/shared";
+import {
+    loadActivityDictionary,
+    renderActivityText,
+    type ActivityDictionary,
+} from "../llm/activityDictionary";
 
 /**
  * The LLM-powered roleplay game. It wires room events into an {@link LLMAgent}
@@ -60,6 +65,8 @@ export class LLMGame extends LogicBase {
     private disclaimerAdded = false;
     /** Local HTTP debug server, present only when llm.debugPort is set. */
     private debugServer: DebugServer | undefined;
+    /** ActivityName -> text template, loaded from ActivityDictionary.csv. */
+    private activityDictionary: ActivityDictionary = new Map();
 
     constructor(
         private conn: API_Connector,
@@ -258,6 +265,8 @@ export class LLMGame extends LogicBase {
             this.debugServer.start();
         }
 
+        this.activityDictionary = await loadActivityDictionary();
+
         console.log("LLM bot ready. Persona loaded, agent running.");
     }
 
@@ -329,7 +338,11 @@ export class LLMGame extends LogicBase {
         // sentence from the message dictionary and feed it in as a regular
         // message. They never trigger safeword handling.
         if (message.Type === "Activity") {
-            const text = extractActivityText(message, connection);
+            const text = extractActivityText(
+                message,
+                connection,
+                this.activityDictionary,
+            );
             if (text) {
                 this.agent.onIncomingMessage(sender, {
                     ...message,
@@ -465,20 +478,54 @@ type ActivityDictionaryEntry = Record<string, unknown>;
 /**
  * Extract a human-readable sentence from an Activity chat message.
  *
- * The most reliable source is the dictionary entry whose `Tag` contains
- * "MISSING TEXT" — its `Text` field holds the fully rendered sentence
- * (e.g. "Mosven nuzzles underneath Captain Amelia's hand."). When that is
- * absent, we fall back to reconstructing a simple sentence from the
- * ActivityName and the source/target character names.
+ * The preferred source is the activity dictionary (ActivityDictionary.csv):
+ * the ActivityName is looked up and its template is rendered with the
+ * source/target character names and pronouns substituted in. When the
+ * activity is not in the dictionary, we fall back to the "MISSING TEXT"
+ * dictionary entry (its `Text` holds a fully rendered sentence), and finally
+ * to reconstructing a simple sentence from the ActivityName and character
+ * names.
  */
 function extractActivityText(
     message: BC_Server_ChatRoomMessage,
     conn: API_Connector,
+    dictionary: ActivityDictionary,
 ): string | undefined {
     const dict = (message.Dictionary ??
         []) as unknown as ActivityDictionaryEntry[];
 
-    // Preferred: the rendered sentence from the "MISSING TEXT" entry.
+    const activityName = dict.find((e) => typeof e.ActivityName === "string")
+        ?.ActivityName as string | undefined;
+    const source = dict.find((e) => e.SourceCharacter !== undefined)
+        ?.SourceCharacter as number | undefined;
+    const target = dict.find((e) => e.TargetCharacter !== undefined)
+        ?.TargetCharacter as number | undefined;
+    const assetEntry = dict.find((e) => e.Tag === "ActivityAsset");
+    const assetName =
+        typeof assetEntry?.AssetName === "string"
+            ? (assetEntry.AssetName as string)
+            : undefined;
+
+    const sourceChar =
+        source !== undefined
+            ? conn.chatRoom?.getCharacter(source)
+            : undefined;
+    const targetChar =
+        target !== undefined
+            ? conn.chatRoom?.getCharacter(target)
+            : undefined;
+
+    // Preferred: render the template from ActivityDictionary.csv.
+    if (activityName) {
+        const rendered = renderActivityText(activityName, dictionary, {
+            source: sourceChar,
+            target: targetChar,
+            assetName,
+        });
+        if (rendered) return rendered;
+    }
+
+    // Fallback 1: the rendered sentence from the "MISSING TEXT" entry.
     for (const entry of dict) {
         const tag = entry.Tag;
         if (
@@ -491,15 +538,8 @@ function extractActivityText(
         }
     }
 
-    // Fallback: reconstruct from ActivityName + character names.
-    const activityName = dict.find((e) => typeof e.ActivityName === "string")
-        ?.ActivityName as string | undefined;
+    // Fallback 2: reconstruct from ActivityName + character names.
     if (!activityName) return undefined;
-
-    const source = dict.find((e) => e.SourceCharacter !== undefined)
-        ?.SourceCharacter as number | undefined;
-    const target = dict.find((e) => e.TargetCharacter !== undefined)
-        ?.TargetCharacter as number | undefined;
 
     const nameOf = (memberNumber?: number): string | undefined => {
         if (memberNumber === undefined) return undefined;
