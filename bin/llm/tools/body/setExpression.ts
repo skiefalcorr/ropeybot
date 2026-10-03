@@ -15,6 +15,7 @@
 import {
     Tool,
     def,
+    displayName,
     findCharacter,
     isProtected,
     requireParticipant,
@@ -56,6 +57,6 @@ export const setExpressionTool: Tool = {
         const limited = checkRateLimit(ctx, memberNumber);
         if (limited) return limited;
         target.SetExpression(group as never, expression as never);
-        return `Set expression of ${target.Name} to ${expression}.`;
+        return `Set expression of ${displayName(target)} to ${expression}.`;
     },
 };

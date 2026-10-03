@@ -15,6 +15,7 @@
 import {
     Tool,
     def,
+    displayName,
     checkRateLimit,
     requireRoomAdmin,
     findCharacter,
@@ -86,6 +87,6 @@ export const roomAdminTool: Tool = {
             Action: action,
             Publish: publish,
         });
-        return `${action} applied to ${target.Name} (${target.MemberNumber}).`;
+        return `${action} applied to ${displayName(target)} (${target.MemberNumber}).`;
     },
 };

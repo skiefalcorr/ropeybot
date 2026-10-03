@@ -20,6 +20,7 @@ import {
 import {
     Tool,
     def,
+    displayName,
     findCharacter,
     isProtected,
     requireParticipant,
@@ -66,6 +67,10 @@ export function isShockItem(item: API_AppearanceItem): boolean {
     );
     if (!config) return false;
 
+    if (item.Name.toLowerCase().includes("shock")){
+        return true;
+    }
+
     const hasShockLevel = (prop: unknown): boolean =>
         !!prop &&
         typeof prop === "object" &&
@@ -78,6 +83,7 @@ export function isShockItem(item: API_AppearanceItem): boolean {
     // Modular items: Modules[].Options[].Property
     const modules = (config as { Modules?: { Options?: { Property?: unknown }[] }[] })
         .Modules;
+
     if (modules?.some((m) => m.Options?.some((o) => hasShockLevel(o.Property))))
         return true;
 
@@ -178,6 +184,6 @@ export const sendShockTool: Tool = {
             triggerDict,
         );
 
-        return `Sent a ${LEVEL_NAMES[level].toLowerCase()} shock to ${target.Name} via ${group}:${item.Name}.`;
+        return `Sent a ${LEVEL_NAMES[level].toLowerCase()} shock to ${displayName(target)} via ${group}:${item.Name}.`;
     },
 };

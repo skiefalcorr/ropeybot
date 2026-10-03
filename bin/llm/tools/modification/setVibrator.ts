@@ -16,6 +16,7 @@ import { API_AppearanceItem } from "bc-bot";
 import {
     Tool,
     def,
+    displayName,
     findCharacter,
     isProtected,
     requireParticipant,
@@ -277,6 +278,6 @@ export const setVibratorTool: Tool = {
         }
 
         const after = vibratorState(item);
-        return `Set ${group}:${item.Name} on ${target.Name}: ${before ?? "off"} → ${after ?? "unknown"}.`;
+        return `Set ${group}:${item.Name} on ${displayName(target)}: ${before ?? "off"} → ${after ?? "unknown"}.`;
     },
 };

@@ -15,6 +15,7 @@
 import {
     Tool,
     def,
+    displayName,
     findCharacter,
     isProtected,
     requireParticipant,
@@ -59,7 +60,7 @@ export const leashTool: Tool = {
             return def?.Effect?.includes("Leash") ?? false;
         });
         if (!leashItem)
-            return `Error: ${target.Name} has no leash item in any slot.`;
+            return `Error: ${displayName(target)} has no leash item in any slot.`;
 
         if (action === "hold") {
             // Push IsLeashed effect to the server so the client shows the leash; maybe redundant
@@ -70,7 +71,7 @@ export const leashTool: Tool = {
             // Msg that leashes
             ctx.conn.SendMessage("Hidden", "HoldLeash", memberNumber);
             ctx.leashed.set(memberNumber, Date.now());
-            return `Holding ${target.Name}'s leash. They must now follow you.`;
+            return `Holding ${displayName(target)}'s leash. They must now follow you.`;
         }
         if (action === "release") {
             // Remove IsLeashed effect
@@ -83,7 +84,7 @@ export const leashTool: Tool = {
             }
             ctx.conn.SendMessage("Hidden", "StopHoldLeash", memberNumber);
             ctx.leashed.delete(memberNumber);
-            return `Released ${target.Name}'s leash.`;
+            return `Released ${displayName(target)}'s leash.`;
         }
         return "Error: action must be 'hold' or 'release'.";
     },

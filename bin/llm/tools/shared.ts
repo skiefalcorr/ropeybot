@@ -73,6 +73,16 @@ export function def(
     };
 }
 
+/**
+ * Human-readable display name for a character: the nickname if set,
+ * otherwise the account name. Use this in any user-facing string (tool
+ * results, history entries, event descriptions) so the model and the
+ * room see the same name the character chose.
+ */
+export function displayName(char: API_Character): string {
+    return char.NickName.length > 0 ? char.NickName : char.Name;
+}
+
 export function findCharacter(
     conn: API_Connector,
     args: Record<string, unknown>,

@@ -22,6 +22,7 @@ import lzString from "lz-string";
 import { CLOTHING_GROUPS } from "./tools";
 import { ITEM_GROUPS } from "./tools/catalog";
 import { vibratorState } from "./tools/modification/setVibrator";
+import { displayName } from "./tools/shared";
 
 /**
  * Decodes a character description that may be LZ-compressed.
@@ -140,7 +141,7 @@ export class ContextBuilder {
         this.history.push({
             ts: Date.now(),
             role: "user",
-            speaker: sender.Name,
+            speaker: displayName(sender),
             memberNumber: sender.MemberNumber,
             type: message.Type,
             content: message.Content,
@@ -297,9 +298,7 @@ export function describeCharacter(
     bioLength: number = 2000,
 ): string {
     const parts: string[] = [];
-    parts.push(
-        `${char.NickName.length != 0 ? char.NickName : char.Name} (member #${char.MemberNumber})`,
-    );
+    parts.push(`${displayName(char)} (member #${char.MemberNumber})`);
 
     const gender = genderLabel(char);
     if (gender) parts.push(gender);

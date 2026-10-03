@@ -26,6 +26,7 @@ import { LLMAgent } from "../llm/agent";
 import { DebugServer } from "../llm/debugServer";
 import { decodeDescription, withBotDisclaimer } from "../llm/context";
 import { parseToolArgs } from "../llm/tools/toolCommand";
+import { displayName } from "../llm/tools/shared";
 
 /**
  * The LLM-powered roleplay game. It wires room events into an {@link LLMAgent}
@@ -168,7 +169,7 @@ export class LLMGame extends LogicBase {
         this.agent.setParticipant(sender.MemberNumber, true);
         this.conn.reply(
             msg,
-            `Welcome, ${sender.Name}! You are now a participant.`,
+            `Welcome, ${displayName(sender)}! You are now a participant.`,
         );
     };
 
@@ -190,11 +191,12 @@ export class LLMGame extends LogicBase {
         const room = this.conn.chatRoom;
         const names = this.agent
             .getParticipants()
-            .map(
-                (n) =>
-                    room?.characters.find((c) => c.MemberNumber === n)?.Name ??
-                    String(n),
-            );
+            .map((n) => {
+                const c = room?.characters.find(
+                    (c) => c.MemberNumber === n,
+                );
+                return c ? displayName(c) : String(n);
+            });
         this.conn.reply(
             msg,
             names.length > 0
@@ -366,7 +368,7 @@ export class LLMGame extends LogicBase {
         if (!this.agent.isParticipant(character.MemberNumber)) {
             return Promise.resolve();
         }
-        this.agent.onEvent(`${character.Name} entered the room.`);
+        this.agent.onEvent(`${displayName(character)} entered the room.`);
         return Promise.resolve();
     }
 
@@ -383,7 +385,7 @@ export class LLMGame extends LogicBase {
         this.agent.setParticipant(character.MemberNumber, false);
         if (!wasParticipant) return;
         this.agent.onEvent(
-            `${character.Name} left the room${intentional ? "" : " (kicked)"}.`,
+            `${displayName(character)} left the room${intentional ? "" : " (kicked)"}.`,
         );
     }
 
@@ -402,8 +404,8 @@ export class LLMGame extends LogicBase {
         // Only react to events about participating characters.
         if (!this.agent.isParticipant(event.character.MemberNumber)) return;
 
-        const who = event.character.Name;
-        const by = event.source ? ` by ${event.source.Name}` : "";
+        const who = displayName(event.character);
+        const by = event.source ? ` by ${displayName(event.source)}` : "";
 
         switch (event.name) {
             case "ItemAdd":
@@ -501,7 +503,8 @@ function extractActivityText(
 
     const nameOf = (memberNumber?: number): string | undefined => {
         if (memberNumber === undefined) return undefined;
-        return conn.chatRoom?.getCharacter(memberNumber)?.Name;
+        const c = conn.chatRoom?.getCharacter(memberNumber);
+        return c ? displayName(c) : undefined;
     };
 
     const sourceName = nameOf(source);
@@ -546,15 +549,16 @@ function extractActionText(
         return undefined;
 
     const destEntry = byTag("DestinationCharacter");
+    const targetChar =
+        typeof destEntry?.MemberNumber === "number"
+            ? conn.chatRoom?.getCharacter(destEntry.MemberNumber)
+            : undefined;
     const targetName =
-        (typeof destEntry?.Text === "string" && destEntry.Text) ||
-        (typeof destEntry?.MemberNumber === "number"
-            ? conn.chatRoom?.getCharacter(destEntry.MemberNumber)?.Name
-            : undefined);
+        targetChar ? displayName(targetChar) : destEntry?.Text;
     if (!targetName) return undefined;
 
     const verb = message.Content === "ActionUse" ? "applied" : "removed";
     return `${targetName} had ${groupName}:${assetName} ${verb} by ${
-        sender.Name
+        displayName(sender)
     }.`;
 }

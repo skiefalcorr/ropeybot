@@ -15,6 +15,7 @@
 import {
     Tool,
     def,
+    displayName,
     findCharacter,
     isProtected,
     requireParticipant,
@@ -52,6 +53,6 @@ export const lockItemTool: Tool = {
         const limited = checkRateLimit(ctx, memberNumber);
         if (limited) return limited;
         item.lock("Lock" as never, ctx.conn.Player.MemberNumber, {});
-        return `Locked ${group} on ${target.Name}.`;
+        return `Locked ${group} on ${displayName(target)}.`;
     },
 };

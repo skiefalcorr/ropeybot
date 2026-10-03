@@ -15,6 +15,7 @@
 import {
     Tool,
     def,
+    displayName,
     findCharacter,
     isProtected,
     requireParticipant,
@@ -53,6 +54,6 @@ export const stripAllTool: Tool = {
             },
             true,
         );
-        return `Stripped all clothes from ${target.Name}.`;
+        return `Stripped all clothes from ${displayName(target)}.`;
     },
 };

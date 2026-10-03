@@ -19,7 +19,7 @@ import {
     type RoomDefinition,
 } from "bc-bot";
 import { LLMClient, LLMChatOptions, LLMMessage } from "./llmClient";
-import { buildTools, resolveTools, Tool, ToolContext } from "./tools";
+import { buildTools, resolveTools, Tool, ToolContext, displayName } from "./tools";
 import { ContextBuilder, type HistoryEntry } from "./context";
 import { LLMLogger } from "./llmLogger";
 import { LLMConfig } from "../config";
@@ -156,7 +156,7 @@ export class LLMAgent {
         message: BC_Server_ChatRoomMessage,
     ): void {
         this.contextBuilder.recordIncoming(sender, message);
-        this.onEvent(`[${sender.Name} ${message.Type}] ${message.Content}`);
+        this.onEvent(`[${displayName(sender)} ${message.Type}] ${message.Content}`);
     }
 
     private scheduleTurn(): void {
@@ -443,7 +443,7 @@ export class LLMAgent {
         const hit = safewords.find((w) => lower.includes(w.toLowerCase()));
         if (!hit) return false;
 
-        console.log(`Safeword '${hit}' used by ${sender.Name}`);
+        console.log(`Safeword '${hit}' used by ${displayName(sender)}`);
 
         const suspendMs = this.config.safewordSuspendMs ?? 600_000;
         this.ctx.suspended.set(sender.MemberNumber, Date.now() + suspendMs);
@@ -462,7 +462,7 @@ export class LLMAgent {
         );
 
         this.contextBuilder.recordSystem(
-            `${sender.Name} used a safeword. All items were removed and actions toward them are suspended.`,
+            `${displayName(sender)} used a safeword. All items were removed and actions toward them are suspended.`,
         );
         return true;
     }

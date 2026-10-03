@@ -12,7 +12,7 @@
  * limitations under the License.
  */
 
-import { Tool, def } from "../shared";
+import { Tool, def, displayName } from "../shared";
 
 export const roomInfoTool: Tool = {
     name: "roomInfo",
@@ -28,7 +28,7 @@ export const roomInfoTool: Tool = {
 
         const info = room.ToInfo();
         const chars = room.characters
-            .map((c) => `${c.Name} (${c.MemberNumber})`)
+            .map((c) => `${displayName(c)} (${c.MemberNumber})`)
             .join(", ");
         const lines = [
             `Name: ${room.Name}`,

@@ -39,7 +39,7 @@ import { updateRoomTool } from "./room/updateRoom";
 import { roomAdminTool } from "./room/roomAdmin";
 import { moveSelfTool } from "./map/moveSelf";
 
-export { Tool, ToolContext } from "./shared";
+export { Tool, ToolContext, displayName } from "./shared";
 export { CLOTHING_GROUPS } from "./catalog";
 
 export function buildTools(): Tool[] {

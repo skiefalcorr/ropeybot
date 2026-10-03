@@ -16,6 +16,7 @@ import { AssetGet, BC_AppearanceItem, isBind } from "bc-bot";
 import {
     Tool,
     def,
+    displayName,
     findCharacter,
     isProtected,
     requireParticipant,
@@ -127,7 +128,7 @@ export const addItemTool: Tool = {
                 { Tag: "FocusAssetGroup", FocusGroupName: group },
             ]);
 
-            return `Added ${group}:${asset} to ${target.Name}.`;
+            return `Added ${group}:${asset} to ${displayName(target)}.`;
         } catch (e) {
             return `Error adding item: ${String(e)}`;
         }

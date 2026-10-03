@@ -15,6 +15,7 @@
 import {
     Tool,
     def,
+    displayName,
     findCharacter,
     isProtected,
     requireParticipant,
@@ -71,6 +72,6 @@ export const removeItemTool: Tool = {
             { Tag: "FocusAssetGroup", FocusGroupName: group },
         ]);
 
-        return `Removed ${group} from ${target.Name}.`;
+        return `Removed ${group} from ${displayName(target)}.`;
     },
 };

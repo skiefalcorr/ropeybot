@@ -15,6 +15,7 @@
 import {
     Tool,
     def,
+    displayName,
     findCharacter,
     isProtected,
     requireParticipant,
@@ -57,6 +58,6 @@ export const setPoseTool: Tool = {
         const limited = checkRateLimit(ctx, memberNumber);
         if (limited) return limited;
         target.SetActivePose(poses as never);
-        return `Set pose of ${target.Name} to ${poses.join(", ")}.`;
+        return `Set pose of ${displayName(target)} to ${poses.join(", ")}.`;
     },
 };
