@@ -36,7 +36,7 @@ export const createRoomTool: Tool = {
         {
             name: {
                 type: "string",
-                description: "Name of the room to create (required)",
+                description: "Name of the room to create (required; accepts letters, numbers and spaces)",
             },
             description: {
                 type: "string",
@@ -96,6 +96,17 @@ export const createRoomTool: Tool = {
         const limited = checkRateLimit(ctx);
         if (limited) return limited;
 
+        // If the bot is already in a room with this name, there is nothing to
+        // do. Without this guard the LLM would retry createRoom forever, since
+        // the server rejects creating a room whose name already exists.
+        const currentRoom = ctx.conn.chatRoom;
+        if (
+            currentRoom &&
+            currentRoom.Name.trim().toLowerCase() === name.toLowerCase()
+        ) {
+            return `Already in room '${currentRoom.Name}'. No new room was created; nothing to do.`;
+        }
+
         const base = ctx.room;
         const parseRoles = (
             value: unknown,
@@ -153,7 +164,6 @@ export const createRoomTool: Tool = {
         // Store the current room's definition so we can return to it if the
         // create fails. Access/Visibility are stripped because the server
         // rejects create requests that include them (InvalidRoomData).
-        const currentRoom = ctx.conn.chatRoom;
         const oldRoomDef: RoomDefinition | undefined = currentRoom
             ? (() => {
                   const info = currentRoom.ToInfo() as RoomDefinition;
@@ -163,11 +173,11 @@ export const createRoomTool: Tool = {
               })()
             : undefined;
 
-        // Leave the current room first so leashed characters follow the bot
-        // into the new room.
-        if (currentRoom) {
-            ctx.conn.ChatRoomLeave();
-        }
+        // // Leave the current room first so leashed characters follow the bot
+        // // into the new room.
+        // if (currentRoom) {
+        //     ctx.conn.ChatRoomLeave();
+        // }
 
         const ok = await ctx.conn.ChatRoomCreate(roomDef);
         if (!ok) {
@@ -176,7 +186,7 @@ export const createRoomTool: Tool = {
                 await ctx.conn.joinOrCreateRoom(oldRoomDef);
                 return `Failed to create room '${name}'. Returned to '${oldRoomDef.Name}'.`;
             }
-            return `Failed to create room '${name}'. It may already exist or the data was invalid.`;
+            return `Failed to create room '${name}' — a room with that name likely already exists. Use the joinRoom tool to enter it instead of retrying createRoom.`;
         }
         // Ping leashed characters so they follow the bot into the new room.
         pingLeashed(ctx);

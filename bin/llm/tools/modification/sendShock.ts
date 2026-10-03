@@ -35,7 +35,7 @@ import {
  *    the collar's level is already set; matches the note that extended
  *    shock items likely only react to TriggerShock.
  */
-const SEND_SET_LEVEL_MESSAGE = true;
+const SEND_SET_LEVEL_MESSAGE = false;
 
 /**
  * Human-readable level names used in the "Set{...}" message content.

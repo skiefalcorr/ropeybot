@@ -20,7 +20,7 @@ import {
 } from "bc-bot";
 import { LLMClient, LLMChatOptions, LLMMessage } from "./llmClient";
 import { buildTools, resolveTools, Tool, ToolContext } from "./tools";
-import { ContextBuilder } from "./context";
+import { ContextBuilder, type HistoryEntry } from "./context";
 import { LLMLogger } from "./llmLogger";
 import { LLMConfig } from "../config";
 
@@ -30,6 +30,20 @@ import { LLMConfig } from "../config";
  * results it just looked up.
  */
 const LOOKUP_TOOLS = ["listItems", "listClothing", "listPoses"];
+
+/**
+ * Tools that perform physical actions on characters. Their results are
+ * persisted into the rolling history so the model remembers what it did
+ * across turns (item add/remove, shocks, vibrator changes, locks).
+ */
+const ACTION_TOOLS = new Set([
+    "addItem",
+    "removeItem",
+    "stripAll",
+    "setVibrator",
+    "sendShock",
+    "lockItem",
+]);
 
 /**
  * The LLM agent. It ingests room events, coalesces them with a debounce
@@ -127,6 +141,7 @@ export class LLMAgent {
      * stream of events can't starve a turn indefinitely).
      */
     onEvent(description: string): void {
+        console.log(description);
         if (this.stopped) return;
         this.pendingEvents.push(description);
         this.scheduleTurn();
@@ -311,7 +326,7 @@ export class LLMAgent {
                 );
                 const hasLookup = LOOKUP_TOOLS.some((t) => batchNames.has(t));
                 let endTurnRequested = false;
-                const toolCallDelayMs = this.config.toolCallDelayMs ?? 150;
+                const toolCallDelayMs = this.config.toolCallDelayMs ?? 500;
                 for (let i = 0; i < result.toolCalls.length; i++) {
                     // Small pause between tool calls so the game server
                     // receives the resulting messages in a stable order.
@@ -350,6 +365,13 @@ export class LLMAgent {
                             String(args.type ?? "Chat"),
                             String(args.content),
                         );
+                    }
+
+                    // Record physical actions so the LLM remembers what it
+                    // did across turns (the tool result is already a
+                    // human-readable summary; failures are recorded too).
+                    if (ACTION_TOOLS.has(name)) {
+                        this.contextBuilder.recordAction(resultText);
                     }
 
                     if (name === "endTurn") {
@@ -527,7 +549,20 @@ export class LLMAgent {
             result = `Error executing ${name}: ${String(e)}`;
         }
         this.recordToolLog("manual", name, args, result);
+        // Persist physical actions into the rolling history the same way
+        // LLM-driven calls are, so the model remembers them across turns.
+        if (ACTION_TOOLS.has(name)) {
+            this.contextBuilder.recordAction(result);
+        }
         return result;
+    }
+
+    /**
+     * Return a copy of the rolling chat/action history (for the debug
+     * server's /history endpoint).
+     */
+    getHistory(): HistoryEntry[] {
+        return this.contextBuilder.getHistory();
     }
 
     /**

@@ -302,12 +302,15 @@ export class LLMGame extends LogicBase {
             return;
         }
 
-        // Ignore non-text message types.
+        // Ignore non-text message types. "Action" is allowed through so the
+        // item add/remove events it carries (ActionUse/ActionRemove) can be
+        // parsed below.
         if (
             message.Type !== "Chat" &&
             message.Type !== "Emote" &&
             message.Type !== "Whisper" &&
-            message.Type !== "Activity"
+            message.Type !== "Activity" &&
+            message.Type !== "Action"
         )
             return;
 
@@ -325,6 +328,22 @@ export class LLMGame extends LogicBase {
         // message. They never trigger safeword handling.
         if (message.Type === "Activity") {
             const text = extractActivityText(message, connection);
+            if (text) {
+                this.agent.onIncomingMessage(sender, {
+                    ...message,
+                    Content: text,
+                });
+            }
+            return;
+        }
+
+        // Action messages (ActionUse / ActionRemove) carry item add/remove
+        // events in their dictionary. The server's ItemAdd/ItemRemove
+        // character events don't always reach us, so parse these directly.
+        // The bot's own actions are already filtered out above (sender === me)
+        // and are recorded from the tool results instead.
+        if ((message.Type as string) === "Action") {
+            const text = extractActionText(message, sender, connection);
             if (text) {
                 this.agent.onIncomingMessage(sender, {
                     ...message,
@@ -389,23 +408,21 @@ export class LLMGame extends LogicBase {
         switch (event.name) {
             case "ItemAdd":
                 if (event.item) {
-                    this.agent.onEvent(
-                        `${who} had ${event.item.Group}:${event.item.Name} applied${by}.`,
-                    );
+                    const text = `${who} had ${event.item.Group}:${event.item.Name} applied${by}.`;
+                    this.agent.onEvent(text);
                 }
                 break;
             case "ItemRemove":
                 if (event.item) {
-                    this.agent.onEvent(
-                        `${who} had ${event.item.Group}:${event.item.Name} removed${by}.`,
-                    );
+                    const text = `${who} had ${event.item.Group}:${event.item.Name} removed${by}.`;
+                    this.agent.onEvent(text);
                 }
                 break;
-            case "PoseChanged":
-                this.agent.onEvent(
-                    `${who}'s pose changed to: ${event.character.Pose.map((P) => P.Name)}${by}.`,
-                );
-                break;
+            // case "PoseChanged":
+            //     this.agent.onEvent(
+            //         `${who}'s pose changed to: ${event.character.Pose.map((P) => P.Name)}${by}.`,
+            //     );
+            //     break;
             default:
                 break;
         }
@@ -497,4 +514,47 @@ function extractActivityText(
         return `${sourceName} performs ${activityName}.`;
     }
     return `${activityName}.`;
+}
+
+/**
+ * Extract a readable sentence from an Action message (ActionUse /
+ * ActionRemove) describing an item being applied or removed. Returns
+ * undefined for action types we don't care about (vibe/shock/etc. are
+ * recorded from the bot's own tool results when the bot is the source).
+ */
+function extractActionText(
+    message: BC_Server_ChatRoomMessage,
+    sender: API_Character,
+    conn: API_Connector,
+): string | undefined {
+    if (message.Content !== "ActionUse" && message.Content !== "ActionRemove")
+        return undefined;
+
+    // Each dictionary entry is self-named via a `Tag` field, with the data
+    // in sibling fields, e.g. { Tag: 'NextAsset', AssetName, GroupName } or
+    // { Tag: 'DestinationCharacter', MemberNumber, Text }.
+    const dict = (message.Dictionary ??
+        []) as unknown as Record<string, unknown>[];
+    const byTag = (tag: string) => dict.find((e) => e.Tag === tag);
+
+    const assetTag =
+        message.Content === "ActionUse" ? "NextAsset" : "PrevAsset";
+    const assetEntry = byTag(assetTag);
+    const assetName = assetEntry?.AssetName;
+    const groupName = assetEntry?.GroupName;
+    if (typeof assetName !== "string" || typeof groupName !== "string")
+        return undefined;
+
+    const destEntry = byTag("DestinationCharacter");
+    const targetName =
+        (typeof destEntry?.Text === "string" && destEntry.Text) ||
+        (typeof destEntry?.MemberNumber === "number"
+            ? conn.chatRoom?.getCharacter(destEntry.MemberNumber)?.Name
+            : undefined);
+    if (!targetName) return undefined;
+
+    const verb = message.Content === "ActionUse" ? "applied" : "removed";
+    return `${targetName} had ${groupName}:${assetName} ${verb} by ${
+        sender.Name
+    }.`;
 }

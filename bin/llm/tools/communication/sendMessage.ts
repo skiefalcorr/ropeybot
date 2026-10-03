@@ -63,6 +63,6 @@ export const sendMessageTool: Tool = {
             content,
             memberNumber,
         );
-        return `Sent ${type}: ${content.slice(0, 80)}`;
+        return `Sent ${type}: ${content}`;
     },
 };

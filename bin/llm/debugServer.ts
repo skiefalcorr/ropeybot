@@ -30,6 +30,7 @@ import { LLMAgent } from "./agent";
  *  - GET  /tools    — all resolved tools with their parameter schemas
  *  - POST /tool     — run a tool directly: { "name": "...", "args": {...} }
  *  - GET  /toollog  — recent tool invocations (LLM + manual), ?limit=N
+ *  - GET  /history  — rolling chat/action history fed to the LLM, ?limit=N
  *  - GET  /llmlog   — last N entries of the llmLog JSONL file, ?limit=N
  *  - POST /stop     — shut the bot down (same as SIGINT)
  */
@@ -101,6 +102,10 @@ export class DebugServer {
                 const limit = this.limitParam(url);
                 const log = this.agent.getToolLog();
                 this.json(res, log.slice(-limit));
+            } else if (req.method === "GET" && path === "/history") {
+                const limit = this.limitParam(url);
+                const history = this.agent.getHistory();
+                this.json(res, history.slice(-limit));
             } else if (req.method === "GET" && path === "/llmlog") {
                 const limit = this.limitParam(url);
                 if (!this.llmLogPath) {

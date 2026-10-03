@@ -19,7 +19,7 @@ export const listItemsTool: Tool = {
     name: "listItems",
     definition: def(
         "listItems",
-        "List available items (restraints and BDSM gear: gags, cuffs, hoods, devices, etc.) as 'group:asset' names so you can use valid names with addItem/removeItem. Optionally filter by group, gender, fetish tag, or a search term.",
+        "List available items (restraints and BDSM gear: gags, cuffs, vibrators, shock devices, etc.) as 'group:asset' names so you can use valid names with addItem/removeItem. Optionally filter by group, gender, fetish tag, or a search term.",
         {
             group: {
                 type: "string",

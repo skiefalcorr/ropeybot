@@ -179,10 +179,33 @@ export class ContextBuilder {
         this.trim();
     }
 
+    /**
+     * Record an action the bot itself performed (item applied/removed,
+     * shock sent, vibrator adjusted, ...) into the history so the model
+     * remembers what it did across turns. Rendered as a plain assistant
+     * line, e.g. "Applied ItemNeckAccessories:Collar to Alice."
+     */
+    recordAction(content: string): void {
+        this.history.push({
+            ts: Date.now(),
+            role: "assistant",
+            type: "Action",
+            content,
+        });
+        this.trim();
+    }
+
     private trim(): void {
         if (this.history.length > this.maxHistory) {
             this.history.splice(0, this.history.length - this.maxHistory);
         }
+    }
+
+    /**
+     * Return a copy of the rolling history (for the debug server).
+     */
+    getHistory(): HistoryEntry[] {
+        return [...this.history];
     }
 
     /**
