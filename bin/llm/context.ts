@@ -198,6 +198,26 @@ export class ContextBuilder {
         this.trim();
     }
 
+    /**
+     * Record a room change the bot underwent (joined/created/left a room via
+     * a tool call, or was leashed into a room by another character) into the
+     * history so the model remembers where it went across turns.
+     *
+     * Recorded as an assistant action (not a SYSTEM note) because some models
+     * reject system-role messages in the middle of a conversation. The content
+     * is the tool's own result string for tool-driven changes, or a clear
+     * sentence for leash-follows.
+     */
+    recordRoomChange(content: string): void {
+        this.history.push({
+            ts: Date.now(),
+            role: "assistant",
+            type: "RoomChange",
+            content,
+        });
+        this.trim();
+    }
+
     private trim(): void {
         if (this.history.length > this.maxHistory) {
             this.history.splice(0, this.history.length - this.maxHistory);

@@ -326,6 +326,11 @@ export class LLMGame extends LogicBase {
         );
         this.conn.ChatRoomLeave();
         void this.conn.ChatRoomJoin(roomName);
+        // Record the room change in the rolling history so the model
+        // remembers it was leashed into the new room across turns.
+        this.agent.recordRoomChange(
+            `You were leashed into room '${roomName}' by ${beep.MemberName}.`,
+        );
     }
 
     protected onMessage(

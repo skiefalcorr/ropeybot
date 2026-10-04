@@ -490,6 +490,13 @@ export class LLMAgent {
                         this.contextBuilder.recordAction(resultText);
                     }
 
+                    // Record room changes (createRoom/joinRoom/leaveRoom) so
+                    // the LLM remembers where it went across turns. The tool
+                    // result is already a human-readable summary.
+                    if (ROOM_CHANGE_TOOLS.includes(name)) {
+                        this.contextBuilder.recordRoomChange(resultText);
+                    }
+
                     if (name === "endTurn") {
                         if (hasRoomChange) {
                             resultText =
@@ -675,7 +682,21 @@ export class LLMAgent {
         if (ACTION_TOOLS.has(name)) {
             this.contextBuilder.recordAction(result);
         }
+        // Persist room changes the same way, so manual !tool room calls are
+        // remembered across turns too.
+        if (ROOM_CHANGE_TOOLS.includes(name)) {
+            this.contextBuilder.recordRoomChange(result);
+        }
         return result;
+    }
+
+    /**
+     * Record a room change the bot underwent (e.g. being leashed into a room
+     * by another character) into the rolling history so the model remembers
+     * where it went across turns.
+     */
+    recordRoomChange(content: string): void {
+        this.contextBuilder.recordRoomChange(content);
     }
 
     /**
