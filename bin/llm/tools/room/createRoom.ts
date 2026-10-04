@@ -178,15 +178,18 @@ export const createRoomTool: Tool = {
         // if (currentRoom) {
         //     ctx.conn.ChatRoomLeave();
         // }
-
-        const ok = await ctx.conn.ChatRoomCreate(roomDef);
+        console.log("Trying to join room...", roomDef);
+        var ok = await ctx.conn.ChatRoomJoin(roomDef.Name);
+        if (ok) {
+            pingLeashed(ctx);
+            return `Existing room already had the same name. Joined room '${name}'.`;
+        }
         if (!ok) {
-            // Fall back to the previous room so the bot isn't left stranded.
-            // if (oldRoomDef) {
-            //     await ctx.conn.joinOrCreateRoom(oldRoomDef);
-            //     return `Failed to create room '${name}'. Returned to '${oldRoomDef.Name}'.`;
-            // }
-            return `Failed to create room '${name}' — a room with that name likely already exists. Use the joinRoom tool to enter it instead of retrying createRoom.`;
+            console.log(`Failed to join room ${roomDef.Name}; trying to create.`)
+            ok = await ctx.conn.ChatRoomCreate(roomDef);
+        }
+        if (!ok) {
+            return `Failed to create room '${name}' — room data was likely incorrect, or the connection died.`;
         }
         // Ping leashed characters so they follow the bot into the new room.
         pingLeashed(ctx);

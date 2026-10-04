@@ -32,6 +32,13 @@ import { LLMConfig } from "../config";
 const LOOKUP_TOOLS = ["listItems", "listClothing", "listPoses"];
 
 /**
+ * Room-changing tools. Calling endTurn in the same batch as one of these is
+ * ignored, since the model should first verify the room change actually took
+ * effect (the server may reject it, or the bot may still be in the old room).
+ */
+const ROOM_CHANGE_TOOLS = ["createRoom", "joinRoom", "leaveRoom"];
+
+/**
  * Tools that perform physical actions on characters. Their results are
  * persisted into the rolling history so the model remembers what it did
  * across turns (item add/remove, shocks, vibrator changes, locks).
@@ -87,6 +94,8 @@ export class LLMAgent {
     private debounceStartedAt = 0;
     /** Member numbers of participants currently showing a "typing" status. */
     private typingMembers = new Set<number>();
+    /** Idle-turn timer, armed after a turn ends to fire a proactive turn. */
+    private idleTimer: NodeJS.Timeout | undefined;
     private running = false;
     private stopped = false;
     private emoticonMissingWarned = false;
@@ -145,8 +154,49 @@ export class LLMAgent {
     onEvent(description: string): void {
         console.log(description);
         if (this.stopped) return;
+        // Any incoming event cancels the idle-turn timer: the normal
+        // debounce window takes over from here.
+        this.cancelIdleTimer();
         this.pendingEvents.push(description);
         this.scheduleTurn();
+    }
+
+    /**
+     * Arm the idle-turn timer. After a turn ends, if no incoming events
+     * arrive within `idleTurnMs`, a proactive turn is fired. No-op when
+     * `idleTurnMs` is unset or non-positive (feature disabled).
+     */
+    private startIdleTimer(): void {
+        this.cancelIdleTimer();
+        const idleMs = this.config.idleTurnMs;
+        if (!idleMs || idleMs <= 0 || this.stopped) return;
+        this.idleTimer = setTimeout(() => {
+            this.idleTimer = undefined;
+            if (this.stopped) return;
+            console.log(
+                `Idle timer fired after ${idleMs} ms with no incoming events; starting proactive turn`,
+            );
+            // Respect typing state, consistent with the debounce: if a
+            // participant is still typing, poll instead of firing.
+            if (this.typingMembers.size > 0) {
+                this.idleTimer = setTimeout(() => {
+                    this.idleTimer = undefined;
+                    void this.runTurn();
+                }, 500);
+                return;
+            }
+            void this.runTurn();
+        }, idleMs);
+    }
+
+    /**
+     * Cancel the idle-turn timer, if armed.
+     */
+    private cancelIdleTimer(): void {
+        if (this.idleTimer) {
+            clearTimeout(this.idleTimer);
+            this.idleTimer = undefined;
+        }
     }
 
     /**
@@ -251,6 +301,7 @@ export class LLMAgent {
         this.pendingEvents = [];
 
         try {
+            //it seems that separately passing events is not really needed
             await this.executeTurn(events);
         } catch (e) {
             console.error("LLM agent turn failed:", e);
@@ -267,6 +318,10 @@ export class LLMAgent {
             this.debounceStartedAt = 0;
             if (this.pendingEvents.length > 0 && !this.stopped) {
                 this.scheduleTurn();
+            } else if (!this.stopped) {
+                // No pending events: arm the idle-turn timer so the bot
+                // proactively continues the roleplay after a quiet period.
+                this.startIdleTimer();
             }
         }
     }
@@ -292,21 +347,29 @@ export class LLMAgent {
             },
         ];
 
-        if (events.length > 0) {
-            messages.push({
+        //it seems that separately passing events is not really needed
+        // if (events.length > 0) {
+        //     messages.push({
+        //         role: "user",
+        //         content:
+        //             "New events in the room:\n" +
+        //             events.join("\n") +
+        //             "\n\nRespond in character. Use tools for everything. But you can write OOC messages in parentheses (Like this) if you want.",
+        //     });
+        // } else {
+        //     messages.push({
+        //         role: "user",
+        //         content:
+        //             //"Continue the roleplay. Act if something feels appropriate, or stay silent.",
+        //             "Respond in character. Use tools for everything. But you can write OOC messages in parentheses (Like this) if you want."
+        //     });
+        // }
+        messages.push({
                 role: "user",
                 content:
-                    "New events in the room:\n" +
-                    events.join("\n") +
-                    "\n\nRespond in character. Use tools for everything. But you can write OOC messages in parentheses (Like this) if you want.",
+                    //"Continue the roleplay. Act if something feels appropriate, or stay silent.",
+                    "Respond in character. Use tools for everything. But you can write OOC messages in parentheses (Like this) if you want."
             });
-        } else {
-            messages.push({
-                role: "user",
-                content:
-                    "Continue the roleplay. Act if something feels appropriate, or stay silent.",
-            });
-        }
 
         const maxIterations = this.config.maxToolIterations ?? 5;
         const toolDefs = this.tools.map((t) => t.definition);
@@ -375,6 +438,9 @@ export class LLMAgent {
                     result.toolCalls.map((c) => c.function.name),
                 );
                 const hasLookup = LOOKUP_TOOLS.some((t) => batchNames.has(t));
+                const hasRoomChange = ROOM_CHANGE_TOOLS.some((t) =>
+                    batchNames.has(t),
+                );
                 let endTurnRequested = false;
                 const toolCallDelayMs = this.config.toolCallDelayMs ?? 500;
                 for (let i = 0; i < result.toolCalls.length; i++) {
@@ -425,7 +491,11 @@ export class LLMAgent {
                     }
 
                     if (name === "endTurn") {
-                        if (hasLookup) {
+                        if (hasRoomChange) {
+                            resultText =
+                                "endTurn ignored: you called a room-changing tool (createRoom/joinRoom/leaveRoom) in this batch. First check the tool result to confirm the room change really worked as intended (the server may have rejected it), then call endTurn.";
+                            console.log(`  -> ${resultText}`);
+                        } else if (hasLookup) {
                             resultText =
                                 "endTurn ignored: you called a lookup tool (listItems/listClothing/listPoses) in this batch. Perform your intended action first, then call endTurn.";
                             console.log(`  -> ${resultText}`);
@@ -673,6 +743,7 @@ export class LLMAgent {
             clearTimeout(this.debounceTimer);
             this.debounceTimer = undefined;
         }
+        this.cancelIdleTimer();
         this.debounceStartedAt = 0;
         this.typingMembers.clear();
         this.setEmoticon(null);

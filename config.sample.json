@@ -54,6 +54,8 @@
         "toolCallDelayMs": 150,
         "debounceMs": 1500,
         "debounceMaxWaitMs": 5000,
+        "_idleTurnMs": "When set to a positive value, the bot arms a timer after each turn ends; if no incoming events arrive within that window, a proactive turn fires. Omit or set to 0 to disable",
+        "idleTurnMs": 0,
         "historyLength": 40,
         "bioLength": 200,
         "temperature": 0.8,

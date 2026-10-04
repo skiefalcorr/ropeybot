@@ -69,6 +69,20 @@ export interface LLMConfig {
      * (polled every ~500 ms) until no participant is still typing. @default true
      */
     waitForTyping?: boolean;
+    /**
+     * Idle-turn timer (ms). When set to a positive value, the bot arms a timer
+     * after each turn ends; if no incoming events arrive within that window,
+     * a proactive turn is fired (using the "continue the roleplay" prompt).
+     * Any incoming event cancels the timer. Omit or set to 0 to disable.
+     * @default 0 (disabled)
+     */
+    idleTurnMs?: number;
+    /**
+     * File path for the `!feedback` command log. Each feedback entry is
+     * appended as a single line: `[<ISO timestamp>] <name> (<memberNumber>): <text>`.
+     * @default "feedback.log"
+     */
+    feedbackFile?: string;
     /** Max chat-history messages kept in context. @default 40 */
     historyLength?: number;
     /** Max characters of a character's bio (Description) shown in room state. 0 hides bios. @default 200 */

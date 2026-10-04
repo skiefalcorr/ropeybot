@@ -23,6 +23,7 @@ import { CLOTHING_GROUPS } from "./tools";
 import { ITEM_GROUPS } from "./tools/catalog";
 import { vibratorState } from "./tools/modification/setVibrator";
 import { displayName } from "./tools/shared";
+import { LLMConfig } from "../config";
 
 /**
  * Decodes a character description that may be LZ-compressed.
@@ -59,14 +60,15 @@ export const BOT_DISCLAIMER_MARKER = "AI Bot:";
 /**
  * Build the disclaimer block for the bot's bio.
  */
-export function botDisclaimer(modelName: string): string {
+export function botDisclaimer(config: LLMConfig): string {
     return (
-        `\n\n${BOT_DISCLAIMER_MARKER} This AI bot is powered by local LLM "${modelName}". \n` +
-        `Model doesn't send data to anyone, but runs slowly. \n` +
-        `It should be able to RP, apply and remove restraints, and hold leash, lol. \n` +
+        `\n\n${BOT_DISCLAIMER_MARKER} This AI bot is powered by local LLM "${config.model}". \n` +
+        `Model doesn't send data to anyone, but runs somewhat slowly. \n` +
+        `It should be able to RP, apply and remove restraints, use leash, and create and join rooms. \n` +
         `It shows emotes for current state: code when LLM thinks, wardrobe when it looks up items, and listening when it waits to begin its turn. \n` +
-        `To allow the bot to react to you, write /bot start. And a greeting. \n` +
-        `Available commands: /bot start, /bot stop, /bot status. \n` +
+        `To allow the bot to react to you, write /bot start. And say or do something. \n` +
+        `Available commands: /bot start, /bot stop, /bot status, /bot feedback. \n` +
+        `Safewords are: "${config.safewords.join(',')}" \n\n` +
         `Source code is at https://github.com/skiefalcorr/ropeybot`
     );
 }
@@ -74,12 +76,12 @@ export function botDisclaimer(modelName: string): string {
 /**
  * Append the bot disclaimer to a bio if it is not already present.
  */
-export function withBotDisclaimer(bio: string, modelName: string): string {
+export function withBotDisclaimer(bio: string, config: LLMConfig): string {
     if (bio.includes(BOT_DISCLAIMER_MARKER)) return bio;
     const trimmed = bio.trimEnd();
     return trimmed
-        ? `${trimmed}\n${botDisclaimer(modelName)}`
-        : botDisclaimer(modelName);
+        ? `${trimmed}\n${botDisclaimer(config)}`
+        : botDisclaimer(config);
 }
 
 /**
@@ -214,14 +216,15 @@ export class ContextBuilder {
      */
     toMessages(): { role: "user" | "assistant"; content: string }[] {
         return this.history.map((h) => {
+            const ts = formatTimestamp(h.ts);
             if (h.role === "assistant") {
-                return { role: "assistant", content: h.content };
+                return { role: "assistant", content: `${ts} ${h.content}` };
             }
             const prefix =
                 h.speaker === "SYSTEM"
                     ? ""
                     : `[${h.speaker} (${h.type ?? "Chat"})] `;
-            return { role: "user", content: prefix + h.content };
+            return { role: "user", content: `${ts} ${prefix}${h.content}` };
         });
     }
 
@@ -235,8 +238,9 @@ export class ContextBuilder {
             "",
             "## How you act",
             "- You can use the available tools to interact with characters.",
+            "- Server closes empty chatrooms, like when you were the only one present and left. In order to go back to it, you'll need to create it again.",
             "- Use listItems (for gear and restraints) / listClothing (for clothing) to discover valid names before using them. Results are looped back into your context for this turn only.",
-            //"- If a character uses a safeword, STOP all actions toward them immediately and respect their request.",
+            "- If a character uses a safeword, or sends OOC message - in parentheses: (like this) - respect their request.",
             //"- Be mindful of consent and comfort. Keep interactions tasteful.",
             "- A fresh 'Current room state' snapshot is provided at the end of the conversation. Trust it over anything you remember.",
             "- Only interact with participating characters. Characters marked 'not participating' are not playing with you — ignore them.",
@@ -274,6 +278,18 @@ export class ContextBuilder {
 
         return lines.join("\n");
     }
+}
+
+/**
+ * Format a millisecond timestamp as a compact local-time string
+ * (e.g. "14:32:07") for use in LLM history messages.
+ */
+function formatTimestamp(ts: number): string {
+    const d = new Date(ts);
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    const ss = String(d.getSeconds()).padStart(2, "0");
+    return `[${hh}:${mm}:${ss}]`;
 }
 
 /**

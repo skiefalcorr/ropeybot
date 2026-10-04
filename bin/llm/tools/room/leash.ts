@@ -26,7 +26,7 @@ export const leashTool: Tool = {
     name: "leash",
     definition: def(
         "leash",
-        "Hold or release a character's leash (works in map rooms). Holding the leash prevents the target from leaving the room and forces them to follow you around the map and into other chat rooms. Release the leash when you no longer need to control their movement.",
+        "Hold or release a character's leash. Holding the leash prevents the target from leaving the room and forces them to follow you around the map and into other chat rooms. Release the leash when you no longer need to control their movement.",
         {
             memberNumber: {
                 type: "number",

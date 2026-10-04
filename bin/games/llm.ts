@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 
+import { appendFileSync } from "node:fs";
 import {
     API_Connector,
     API_Character,
@@ -24,7 +25,7 @@ import {
 import { LLMConfig, ConfigFile } from "../config";
 import { LLMAgent } from "../llm/agent";
 import { DebugServer } from "../llm/debugServer";
-import { decodeDescription, withBotDisclaimer } from "../llm/context";
+import { decodeDescription, stripBotDisclaimer, withBotDisclaimer } from "../llm/context";
 import { parseToolArgs } from "../llm/tools/toolCommand";
 import { displayName } from "../llm/tools/shared";
 import {
@@ -42,15 +43,6 @@ import {
  * the config, and optionally a starting pose.
  */
 export class LLMGame extends LogicBase {
-    public static description = [
-        "An LLM-powered roleplay bot.",
-        "It chats and interacts with characters in the room, using a local LLM to decide its actions.",
-        "Use !start to join, !stop to leave, !status to list participants.",
-        "Say a safeword to make it stop and remove any items it placed on you.",
-        "Superusers can test tools without the LLM: !tools, !tool <name> [args], !toolstatus.",
-        "Code at https://github.com/FriendsOfBC/ropeybot",
-    ].join("\n");
-
     private agent: LLMAgent;
     private commandParser: CommandParser;
     /** Nickname as it was before init() modified it, restored on stop(). */
@@ -83,6 +75,7 @@ export class LLMGame extends LogicBase {
         this.commandParser.register("tools", this.onCommandTools);
         this.commandParser.register("tool", this.onCommandTool);
         this.commandParser.register("toolstatus", this.onCommandToolStatus);
+        this.commandParser.register("feedback", this.onCommandFeedback);
     }
 
     /**
@@ -169,6 +162,47 @@ export class LLMGame extends LogicBase {
         this.conn.reply(msg, this.agent.getToolStatus());
     };
 
+    /**
+     * The CommandParser lowercases the whole command string before splitting,
+     * which would mangle the feedback text. Re-extract the raw substring after
+     * the 'feedback ' prefix from the original message content so case and
+     * punctuation are preserved.
+     */
+    private extractRawFeedback(msg: BC_Server_ChatRoomMessage): string {
+        const content = msg.Content.replace(/^\(+/, "").replace(/\)+$/, "");
+        const lower = content.toLowerCase();
+        const idx = lower.indexOf("feedback ");
+        if (idx === -1) return "";
+        return content.slice(idx + "feedback ".length).trim();
+    }
+
+    /**
+     * `!feedback <text>` — append the sender's feedback to the feedback log
+     * file. Available to any character (it is a feedback channel, not a
+     * superuser tool).
+     */
+    private onCommandFeedback = (
+        sender: API_Character,
+        msg: BC_Server_ChatRoomMessage,
+    ): void => {
+        const text = this.extractRawFeedback(msg);
+        if (!text) {
+            this.conn.reply(msg, "Usage: !feedback <your feedback>");
+            return;
+        }
+        const file = this.llmConfig.feedbackFile ?? "feedback.log";
+        const line = `[${new Date().toISOString()}] ${displayName(
+            sender,
+        )} (${sender.MemberNumber}): ${text}\n`;
+        try {
+            appendFileSync(file, line);
+            this.conn.reply(msg, "Thanks for the feedback!");
+        } catch (e) {
+            console.error("Failed to write feedback:", e);
+            this.conn.reply(msg, "Sorry, I couldn't record that.");
+        }
+    };
+
     private onCommandStart = (
         sender: API_Character,
         msg: BC_Server_ChatRoomMessage,
@@ -230,7 +264,8 @@ export class LLMGame extends LogicBase {
         // reaches the LLM.
         const bio = decodeDescription(me.Description ?? "");
         this.originalBio = bio;
-        const newBio = withBotDisclaimer(bio, this.llmConfig.model);
+        var newBio = stripBotDisclaimer(bio);
+        newBio = withBotDisclaimer(newBio, this.llmConfig);
         if (newBio !== bio) {
             this.disclaimerAdded = true;
             this.conn.setBotDescription(newBio);
