@@ -20,6 +20,7 @@ import {
     findCharacter,
     isProtected,
     requireParticipant,
+    requireUnrestrained,
     checkRateLimit,
 } from "../shared";
 import { validateAsset } from "../catalog";
@@ -78,6 +79,8 @@ export const addItemTool: Tool = {
             return "Refused: that character is protected or suspended.";
         const refused = requireParticipant(ctx, memberNumber);
         if (refused) return refused;
+        const restrained = requireUnrestrained(ctx);
+        if (restrained) return restrained;
         const grp = validateAsset(group, asset);
         if (!grp)
             return `Error: '${group}:${asset}' is not a valid item. Use listItems or listClothing to find valid names.`;

@@ -3,9 +3,7 @@ Autosave LLM chat history after each turn. Save it separately when session ends.
 
 leash with a collar?
 
-add /bot feedback command that writes into a file
-
-track character "talking" status for debounce
+lower timeout
 
 Somewhere in future:
 Map stuff - navigation etc

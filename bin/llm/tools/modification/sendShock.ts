@@ -24,6 +24,7 @@ import {
     findCharacter,
     isProtected,
     requireParticipant,
+    requireUnrestrained,
     checkRateLimit,
 } from "../shared";
 
@@ -124,6 +125,8 @@ export const sendShockTool: Tool = {
             return "Refused: that character is protected or suspended.";
         const refused = requireParticipant(ctx, memberNumber);
         if (refused) return refused;
+        const restrained = requireUnrestrained(ctx);
+        if (restrained) return restrained;
 
         const item = target.Appearance.InventoryGet(group as never);
         if (!item)

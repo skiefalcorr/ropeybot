@@ -25,7 +25,12 @@ import {
 import { LLMConfig, ConfigFile } from "../config";
 import { LLMAgent } from "../llm/agent";
 import { DebugServer } from "../llm/debugServer";
-import { decodeDescription, stripBotDisclaimer, withBotDisclaimer } from "../llm/context";
+import {
+    decodeDescription,
+    messageContent,
+    stripBotDisclaimer,
+    withBotDisclaimer,
+} from "../llm/context";
 import { parseToolArgs } from "../llm/tools/toolCommand";
 import { displayName } from "../llm/tools/shared";
 import {
@@ -208,9 +213,12 @@ export class LLMGame extends LogicBase {
         msg: BC_Server_ChatRoomMessage,
     ): void => {
         this.agent.setParticipant(sender.MemberNumber, true);
+        const safewords = (this.llmConfig.safewords).join(", ");
         this.conn.reply(
             msg,
-            `Welcome, ${displayName(sender)}! You are now a participant.`,
+            `Welcome, ${displayName(sender)}! You can now RP with me — say something or poke/pet me.\n` +
+            `It takes me around 1 minute to reply. \n` +
+            `Commands: /bot start, /bot stop, /bot feedback. Safewords: ${safewords}.`,
         );
     };
 
@@ -417,6 +425,17 @@ export class LLMGame extends LogicBase {
                     ...message,
                     Content: text,
                 });
+            } else {
+                // Other Action messages (e.g. item-triggered "Beep" when a
+                // nose plug releases) carry their descriptive text in the
+                // dictionary under the "msg" tag rather than in Content.
+                const msgText = messageContent(message);
+                if (msgText && msgText !== message.Content) {
+                    this.agent.onIncomingMessage(sender, {
+                        ...message,
+                        Content: msgText,
+                    });
+                }
             }
             return;
         }

@@ -20,7 +20,7 @@ import {
 } from "bc-bot";
 import { LLMClient, LLMChatOptions, LLMMessage } from "./llmClient";
 import { buildTools, resolveTools, Tool, ToolContext, displayName } from "./tools";
-import { ContextBuilder, type HistoryEntry } from "./context";
+import { ContextBuilder, messageContent, type HistoryEntry } from "./context";
 import { LLMLogger } from "./llmLogger";
 import { LLMConfig } from "../config";
 
@@ -235,7 +235,9 @@ export class LLMAgent {
         message: BC_Server_ChatRoomMessage,
     ): void {
         this.contextBuilder.recordIncoming(sender, message);
-        this.onEvent(`[${displayName(sender)} ${message.Type}] ${message.Content}`);
+        this.onEvent(
+            `[${displayName(sender)} ${message.Type}] ${messageContent(message)}`,
+        );
     }
 
     private scheduleTurn(): void {
@@ -346,6 +348,13 @@ export class LLMAgent {
                 content: this.contextBuilder.buildRoomStateMessage(this.conn),
             },
         ];
+
+        // Watermark of how many history entries are already reflected in
+        // `messages`. Each iteration appends only the NEW entries (in their
+        // original order) plus a fresh room-state snapshot, so the model sees
+        // mid-turn events and its own actions' effects without re-sending the
+        // whole history.
+        let historyWatermark = this.contextBuilder.getHistory().length;
 
         //it seems that separately passing events is not really needed
         // if (events.length > 0) {
@@ -525,6 +534,34 @@ export class LLMAgent {
                 }
 
                 prevBatchHadLookup = hasLookup;
+
+                // Refresh context before the next LLM call so the model sees
+                // the effects of the actions it just took and any events that
+                // arrived mid-turn. Append only NEW user-role history entries
+                // (in their original order) plus a fresh room-state snapshot.
+                //
+                // Only user entries are appended: the bot's own actions are
+                // already visible as the `tool` results above, and appending
+                // the assistant history entries (recorded via recordOutgoing /
+                // recordAction) here would place an assistant message AFTER a
+                // tool message, which violates the API rule that a tool message
+                // must be immediately followed by the assistant message that
+                // made those calls. The fresh snapshot is the authoritative
+                // picture of who is wearing what.
+                const newEntries = this.contextBuilder.getMessagesSince(
+                    historyWatermark,
+                    ["user"],
+                );
+                historyWatermark = this.contextBuilder.getHistory().length;
+                for (const entry of newEntries) {
+                    messages.push(entry);
+                }
+                messages.push({
+                    role: "user",
+                    content: this.contextBuilder.buildRoomStateMessage(
+                        this.conn,
+                    ),
+                });
             }
 
             console.warn(

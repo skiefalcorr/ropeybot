@@ -153,6 +153,17 @@ export function requireParticipant(
 }
 
 /**
+ * Restraint gate. Returns null if the bot's own arms are free, or an error
+ * string when the bot is restrained and cannot use items.
+ */
+export function requireUnrestrained(ctx: ToolContext): string | null {
+    if (ctx.conn.Player.IsRestrained()) {
+        return "Your arms are restrained, you can't use items";
+    }
+    return null;
+}
+
+/**
  * Room-admin gate. Returns null if the bot is an admin of the current room,
  * or an error string explaining the refusal.
  */

@@ -20,6 +20,7 @@ import {
     findCharacter,
     isProtected,
     requireParticipant,
+    requireUnrestrained,
     checkRateLimit,
 } from "../shared";
 
@@ -174,7 +175,7 @@ export const setVibratorTool: Tool = {
     name: "setVibrator",
     definition: def(
         "setVibrator",
-        "Control a vibrator item already worn by a character: set its intensity level and/or mode. The character must already have the item in the given group. Intensity: -1 off, 0 low, 1 medium, 2 high, 3 maximum. Mode: Off, Low, Medium, High, Maximum, Random, Escalate, Tease, Deny, Edge.",
+        "Control a vibrator item already worn by a character: set its intensity level and/or mode. The character must already have the item in the given group. Intensity: -1 off, 0 low, 1 medium, 2 high, 3 maximum. Mode: Off, Low, Medium, High, Maximum, Random, Escalate, Tease, Deny, Edge. Random mode randomizes intensity over time.",
         {
             memberNumber: {
                 type: "number",
@@ -218,6 +219,8 @@ export const setVibratorTool: Tool = {
             return "Refused: that character is protected or suspended.";
         const refused = requireParticipant(ctx, memberNumber);
         if (refused) return refused;
+        const restrained = requireUnrestrained(ctx);
+        if (restrained) return restrained;
 
         const item = target.Appearance.InventoryGet(group as never);
         if (!item)
