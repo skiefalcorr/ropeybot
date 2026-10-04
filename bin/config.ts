@@ -62,6 +62,13 @@ export interface LLMConfig {
      * starving the debounce window indefinitely. @default 5000
      */
     debounceMaxWaitMs?: number;
+    /**
+     * Wait for all participants to stop typing (Status 'Talk' -> 'null')
+     * before the debounce window fires a turn. When enabled, a 'Talk' status
+     * from a participant restarts the debounce window, and the turn is held
+     * (polled every ~500 ms) until no participant is still typing. @default true
+     */
+    waitForTyping?: boolean;
     /** Max chat-history messages kept in context. @default 40 */
     historyLength?: number;
     /** Max characters of a character's bio (Description) shown in room state. 0 hides bios. @default 200 */

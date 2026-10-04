@@ -36,7 +36,7 @@ export const createRoomTool: Tool = {
         {
             name: {
                 type: "string",
-                description: "Name of the room to create (required; accepts letters, numbers and spaces)",
+                description: "Name of the room to create (required; accepts letters, numbers and spaces; no apostrophes)",
             },
             description: {
                 type: "string",
@@ -68,30 +68,30 @@ export const createRoomTool: Tool = {
                 type: "number",
                 description: "Maximum number of members allowed in the room.",
             },
-            access: {
-                type: "string",
-                description:
-                    "Who may enter and leave: 'All', 'Admin' or 'Whitelist', comma-separated. 'Admin' or 'Whitelist' to lock a room.",
-            },
-            visibility: {
-                type: "string",
-                description:
-                    "Who can see the room in search: 'All', 'Admin' or 'Whitelist', comma-separated.",
-            },
-            // private: {
-            //     type: "boolean",
+            // access: {
+            //     type: "string",
             //     description:
-            //         "Whether the room is private (hidden from search).",
+            //         "Who may enter and leave: 'All', 'Admin' or 'Whitelist', comma-separated. 'Admin' or 'Whitelist' to lock a room.",
             // },
-            // locked: {
-            //     type: "boolean",
-            //     description: "Whether the room is locked (no entry or exit except for admins).",
+            // visibility: {
+            //     type: "string",
+            //     description:
+            //         "Who can see the room in search: 'All', 'Admin' or 'Whitelist', comma-separated.",
             // },
+            private: {
+                type: "boolean",
+                description:
+                    "Whether the room is private (hidden from search).",
+            },
+            locked: {
+                type: "boolean",
+                description: "Whether the room is locked (no entry or exit except for admins).",
+            },
         },
         ["name"],
     ),
     handler: async (args, ctx) => {
-        const name = String(args.name ?? "").trim();
+        const name = String(args.name ?? "").trim().replace(/'/g, '');
         if (!name) return "Error: room name is required.";
         const limited = checkRateLimit(ctx);
         if (limited) return limited;
@@ -154,12 +154,12 @@ export const createRoomTool: Tool = {
                     ? (args.language as RoomDefinition["Language"])
                     : base.Language,
         };
-        if (typeof args.access === "string" && args.access.trim()) {
-            roomDef.Access = parseRoles(args.access, ["All"]);
-        }
-        if (typeof args.visibility === "string" && args.visibility.trim()) {
-            roomDef.Visibility = parseRoles(args.visibility, ["All"]);
-        }
+        // if (typeof args.access === "string" && args.access.trim()) {
+        //     roomDef.Access = parseRoles(args.access, ["All"]);
+        // }
+        // if (typeof args.visibility === "string" && args.visibility.trim()) {
+        //     roomDef.Visibility = parseRoles(args.visibility, ["All"]);
+        // }
 
         // Store the current room's definition so we can return to it if the
         // create fails. Access/Visibility are stripped because the server
@@ -182,10 +182,10 @@ export const createRoomTool: Tool = {
         const ok = await ctx.conn.ChatRoomCreate(roomDef);
         if (!ok) {
             // Fall back to the previous room so the bot isn't left stranded.
-            if (oldRoomDef) {
-                await ctx.conn.joinOrCreateRoom(oldRoomDef);
-                return `Failed to create room '${name}'. Returned to '${oldRoomDef.Name}'.`;
-            }
+            // if (oldRoomDef) {
+            //     await ctx.conn.joinOrCreateRoom(oldRoomDef);
+            //     return `Failed to create room '${name}'. Returned to '${oldRoomDef.Name}'.`;
+            // }
             return `Failed to create room '${name}' — a room with that name likely already exists. Use the joinRoom tool to enter it instead of retrying createRoom.`;
         }
         // Ping leashed characters so they follow the bot into the new room.

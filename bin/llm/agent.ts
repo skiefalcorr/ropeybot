@@ -85,6 +85,8 @@ export class LLMAgent {
     private debounceTimer: NodeJS.Timeout | undefined;
     /** Wall-clock time the current debounce window started (0 = none). */
     private debounceStartedAt = 0;
+    /** Member numbers of participants currently showing a "typing" status. */
+    private typingMembers = new Set<number>();
     private running = false;
     private stopped = false;
     private emoticonMissingWarned = false;
@@ -148,6 +150,33 @@ export class LLMAgent {
     }
 
     /**
+     * Record a typing-status change for a participant.
+     *
+     * When `isTyping` is true the member is added to the typing set and the
+     * debounce window is restarted (same as a normal event) so the bot waits
+     * for the participant to finish. When `isTyping` is false the member is
+     * simply removed; the existing timer keeps running.
+     *
+     * No-op when `waitForTyping` is disabled in the config.
+     */
+    onTypingStatus(memberNumber: number, isTyping: boolean): void {
+        if (this.stopped) return;
+        if (this.config.waitForTyping === false) return;
+        if (isTyping) {
+            this.typingMembers.add(memberNumber);
+            console.log(
+                `Typing status: ${memberNumber} is typing (${this.typingMembers.size} total)`,
+            );
+            this.scheduleTurn();
+        } else {
+            this.typingMembers.delete(memberNumber);
+            console.log(
+                `Typing status: ${memberNumber} stopped typing (${this.typingMembers.size} remaining)`,
+            );
+        }
+    }
+
+    /**
      * Record an incoming chat message into the rolling history and feed it
      * to the agent as an event.
      */
@@ -177,14 +206,35 @@ export class LLMAgent {
 
         const debounceMs = this.config.debounceMs ?? 1500;
         const maxWaitMs = this.config.debounceMaxWaitMs ?? 5000;
+        const anyoneTyping = this.typingMembers.size > 0;
 
         // Starvation guard: fire no later than maxWaitMs after the first
-        // pending event, even if events keep arriving.
-        const remainingMaxWait = maxWaitMs - (now - this.debounceStartedAt);
-        const delay = Math.max(0, Math.min(debounceMs, remainingMaxWait));
+        // pending event, even if events keep arriving. Skipped while a
+        // participant is still typing — we genuinely want to wait for them.
+        let delay: number;
+        if (anyoneTyping) {
+            delay = debounceMs;
+        } else {
+            const remainingMaxWait = maxWaitMs - (now - this.debounceStartedAt);
+            delay = Math.max(0, Math.min(debounceMs, remainingMaxWait));
+        }
 
         this.debounceTimer = setTimeout(() => {
             this.debounceTimer = undefined;
+
+            // If a participant is still typing, don't fire the turn yet.
+            // Reschedule with a short poll so we check again soon.
+            if (this.typingMembers.size > 0) {
+                console.log(
+                    `Debounce fired but ${this.typingMembers.size} participant(s) still typing; polling in 500 ms`,
+                );
+                this.debounceTimer = setTimeout(() => {
+                    this.debounceTimer = undefined;
+                    void this.runTurn();
+                }, 500);
+                return;
+            }
+
             this.debounceStartedAt = 0;
             void this.runTurn();
         }, delay);
@@ -499,6 +549,7 @@ export class LLMAgent {
             this.ctx.participants.add(memberNumber);
         } else {
             this.ctx.participants.delete(memberNumber);
+            this.typingMembers.delete(memberNumber);
             this.releaseLeash(memberNumber);
         }
     }
@@ -623,6 +674,7 @@ export class LLMAgent {
             this.debounceTimer = undefined;
         }
         this.debounceStartedAt = 0;
+        this.typingMembers.clear();
         this.setEmoticon(null);
         this.logger?.close();
     }

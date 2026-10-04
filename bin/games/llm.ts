@@ -313,6 +313,19 @@ export class LLMGame extends LogicBase {
             return;
         }
 
+        // Status messages carry typing indicators ("Talk" / "null").
+        // Route them to the agent so it can track who is still typing and
+        // hold the debounce window until everyone is done.
+        if (message.Type === "Status") {
+            if (this.agent.isParticipant(sender.MemberNumber)) {
+                this.agent.onTypingStatus(
+                    sender.MemberNumber,
+                    message.Content === "Talk",
+                );
+            }
+            return;
+        }
+
         // Ignore non-text message types. "Action" is allowed through so the
         // item add/remove events it carries (ActionUse/ActionRemove) can be
         // parsed below.
@@ -479,12 +492,12 @@ type ActivityDictionaryEntry = Record<string, unknown>;
  * Extract a human-readable sentence from an Activity chat message.
  *
  * The preferred source is the activity dictionary (ActivityDictionary.csv):
- * the ActivityName is looked up and its template is rendered with the
- * source/target character names and pronouns substituted in. When the
- * activity is not in the dictionary, we fall back to the "MISSING TEXT"
- * dictionary entry (its `Text` holds a fully rendered sentence), and finally
- * to reconstructing a simple sentence from the ActivityName and character
- * names.
+ * the message Content (e.g. "ChatSelf-ItemArms-Wiggle") is looked up and its
+ * template is rendered with the source/target character names and pronouns
+ * substituted in. When the content is not in the dictionary, we fall back to
+ * the "MISSING TEXT" dictionary entry (its `Text` holds a fully rendered
+ * sentence), and finally to reconstructing a simple sentence from the
+ * ActivityName and character names.
  */
 function extractActivityText(
     message: BC_Server_ChatRoomMessage,
@@ -515,9 +528,11 @@ function extractActivityText(
             ? conn.chatRoom?.getCharacter(target)
             : undefined;
 
-    // Preferred: render the template from ActivityDictionary.csv.
-    if (activityName) {
-        const rendered = renderActivityText(activityName, dictionary, {
+    // Preferred: render the template from ActivityDictionary.csv. The CSV is
+    // keyed by the message Content (e.g. "ChatSelf-ItemArms-Wiggle"), not by
+    // the short ActivityName.
+    if (typeof message.Content === "string" && message.Content) {
+        const rendered = renderActivityText(message.Content, dictionary, {
             source: sourceChar,
             target: targetChar,
             assetName,
