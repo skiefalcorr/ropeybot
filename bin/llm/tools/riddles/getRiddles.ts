@@ -55,15 +55,32 @@ export function createGetRiddlesTool(
                     : options.defaultBatchSize;
 
             const target = resolvePlayer(ctx, args);
-            const exclude = target ? state.solvedIds(target.memberNumber) : [];
+            const solved = target ? state.solvedIds(target.memberNumber) : [];
+            const recent = target
+                ? state.recentOffered(target.memberNumber)
+                : [];
 
-            const picked = pickRandomRiddles(options.pool, count, exclude);
+            const picked = pickRandomRiddles(
+                options.pool,
+                count,
+                solved,
+                recent,
+            );
             if (picked.length === 0) {
                 return "No riddles available. The riddle table appears to be empty.";
             }
 
+            // Remember what was handed out so the next draw does not repeat
+            // these — the model often asks for a batch and uses only one.
+            if (target) {
+                state.markOffered(
+                    target.memberNumber,
+                    picked.map((r) => r.id),
+                );
+            }
+
             const note = target
-                ? ` (avoiding ${exclude.length} riddle(s) ${target.name} already solved)`
+                ? ` (avoiding ${solved.length} riddle(s) ${target.name} already solved)`
                 : "";
             return [
                 `Got ${picked.length} riddle(s)${note}:`,

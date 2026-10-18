@@ -178,6 +178,44 @@ answers into character.
 debounced and atomic (temp file + rename), and flushed on shutdown. Deleting
 the file resets everyone.
 
+### Restraint slots in the character summary
+
+Each character's description is a one-line `|`-separated summary followed by
+an exhaustive, aligned slot block:
+
+```
+Loona (member #144334) | female | bio: … | pose: Standing
+restraints (every slot is listed; — means empty):
+  ItemFeet              —
+  ItemLegs              PawPaddedPetsuitLegs
+  ItemMouth             BallGag
+  ItemMouth2            —
+  ItemMouth3            —
+  ItemHead              LeatherBlindfold
+  …
+```
+
+Why it looks like this:
+
+- **Every slot is always listed**, with `—` for empty. A missing row would
+  leave the model unable to distinguish "empty" from "not reported".
+- The slot list is the **union** of `ITEM_GROUPS` and any item group actually
+  present on the character, so a group the catalog does not classify as
+  `Category: "Item"` (e.g. `Mask`) can never be silently dropped.
+- Order is `ITEM_GROUPS` order with extras appended alphabetically, so the
+  block is stable across turns.
+- Aligned columns on their own lines rather than a markdown table: the summary
+  line is `|`-separated, and pipes inside it would nest unreadably.
+- `ItemMouth`, `ItemMouth2` and `ItemMouth3` are three independent slots and
+  are reported separately — `bin/hub/logic/kidnappersGameRoom.ts` already
+  relies on that distinction.
+- Vibrator state is folded into the cell (`Vibrator [vibe:high]`).
+- `restrained` and `gagged` are **not** in the summary: both are derivable
+  from the slots, and a summary flag disagreeing with the table would be
+  worse than either alone. `naked` stays because it also weighs clothing.
+
+Cost is roughly one line per item group (28 today) per character per turn.
+
 ### Prompt layout
 
 - Riddle rules go into the **static** system prompt (`systemSections`), so the

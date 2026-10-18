@@ -131,38 +131,26 @@ export class RiddlesActivity implements LLMActivity {
         ];
     }
 
+    /**
+     * The only activity-wide block: a leaderboard.
+     *
+     * Per-player state (progress, current riddle, answer) deliberately lives
+     * in {@link characterAnnotations} and nowhere else — duplicating it here
+     * just wasted context and repeated the same numbers twice.
+     */
     roomStateSections(): string[] {
-        const goal = this.state.getGoal();
         const board = this.state.leaderboard(5);
-        const lines: string[] = [`Riddles (goal ${goal} solved):`];
+        if (board.length === 0) return [];
 
-        const active = this.state
-            .all()
-            .filter((p) => p.record.state === "asked");
-        if (active.length === 0) {
-            lines.push("- Nobody is currently working on a riddle.");
-        } else {
-            for (const { record } of active) {
-                lines.push(
-                    `- ${record.name}: "${record.question}"` +
-                        ` (answer: ${record.answer}) — wrong attempts: ${record.attempts}`,
-                );
-            }
-        }
-
-        if (board.length > 0) {
-            lines.push(
-                "Leaderboard: " +
-                    board
-                        .map(
-                            (b) =>
-                                `${b.name} ${b.solved}/${goal}` +
-                                (b.failed > 0 ? ` (${b.failed} given up)` : ""),
-                        )
-                        .join(", "),
-            );
-        }
-        return lines;
+        const goal = this.state.getGoal();
+        return [
+            `Riddle leaderboard (standings only — a player's current riddle is shown under their name above), goal ${goal} solved:`,
+            ...board.map(
+                (b, i) =>
+                    `${i + 1}. ${b.name} — ${b.solved}/${goal}` +
+                    (b.failed > 0 ? ` (${b.failed} given up)` : ""),
+            ),
+        ];
     }
 
     /**

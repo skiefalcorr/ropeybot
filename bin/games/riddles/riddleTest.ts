@@ -38,7 +38,13 @@ import {
     buildActivities,
     enabledActivityIds,
 } from "../../llm/activities/registry";
-import { ContextBuilder } from "../../llm/context";
+import {
+    ContextBuilder,
+    describeCharacter,
+    describeRestraintSlots,
+    restraintSlots,
+} from "../../llm/context";
+import { ITEM_GROUPS } from "../../llm/tools/catalog";
 
 let passed = 0;
 let failed = 0;
@@ -135,14 +141,35 @@ function testPicking(): void {
         ["c"],
     );
 
-    // With only one unsolved riddle left but two requested, the fallback
-    // widens the pool rather than returning a short list.
+    // Top-up: with only one unsolved riddle left but two requested, the count
+    // is still filled (tier 3 may re-offer an already-solved riddle).
     const widened = pickRandomRiddles(pool, 2, ["a", "b"]);
-    equal("widens the pool when too few unsolved remain", widened.length, 2);
+    equal("tops up to the requested count", widened.length, 2);
+    check(
+        "the tier-1 pick survives the top-up",
+        widened.some((r) => r.id === "c"),
+    );
+    check(
+        "no id is returned twice in one call",
+        new Set(widened.map((r) => r.id)).size === 2,
+    );
+
+    // Recency: a riddle just offered is avoided while fresh ones remain.
+    const afterOffer = pickRandomRiddles(pool, 1, [], ["a", "b"]);
+    equal(
+        "avoids recently offered riddles",
+        afterOffer.map((r) => r.id),
+        ["c"],
+    );
+
+    // Recency is soft: when freshness runs out, a recently offered riddle is
+    // preferred over returning short.
+    const recencyExhausted = pickRandomRiddles(pool, 2, [], ["a", "b"]);
+    equal("tops up past the recency buffer", recencyExhausted.length, 2);
 
     const exhausted = pickRandomRiddles(pool, 2, ["a", "b", "c"]);
     equal(
-        "falls back to the full pool when everything is solved",
+        "still fills the count when everything is solved",
         exhausted.length,
         2,
     );
@@ -236,6 +263,39 @@ function testStateMachine(): void {
     equal("round-trips solved count", restored.solvedCount(1), 3);
     equal("round-trips failed count", restored.peek(2)?.failedCount, 1);
     check("round-trips greeted flag", restored.wasGreeted(9));
+
+    // Recently-offered buffer: bounded, de-duplicated, newest last.
+    const offerState = new RiddleState(3);
+    offerState.touch(5, "Eve");
+    offerState.markOffered(5, ["x", "y"]);
+    equal("remembers offered ids", offerState.recentOffered(5), ["x", "y"]);
+    offerState.markOffered(5, ["x"]);
+    equal("re-offering moves the id to the end", offerState.recentOffered(5), [
+        "y",
+        "x",
+    ]);
+    offerState.markOffered(
+        5,
+        Array.from({ length: 60 }, (_, i) => `id${i}`),
+    );
+    check(
+        "the buffer stays bounded",
+        offerState.recentOffered(5).length <= 40,
+        `got ${offerState.recentOffered(5).length}`,
+    );
+    equal(
+        "the newest offer is kept",
+        offerState.recentOffered(5).at(-1),
+        "id59",
+    );
+
+    const offerRoundTrip = new RiddleState(3);
+    offerRoundTrip.load(offerState.toJSON());
+    equal(
+        "offered ids survive a save/load round-trip",
+        offerRoundTrip.recentOffered(5),
+        offerState.recentOffered(5),
+    );
 
     restored.reset();
     equal("reset clears everyone", restored.all().length, 0);
@@ -591,15 +651,19 @@ async function testRegistryAndContext(): Promise<void> {
     await activity.init(ctx);
     activity.onCharacterEntered(ctx, alice as never);
 
-    // Give Alice a riddle so the annotation has content.
+    // Give Alice a riddle so the annotation has content, and record one solve
+    // so the leaderboard section has standings to show.
     const assignTool = activity
         .getTools()
         .find((t) => t.name === "getSingleRiddle");
-    await assignTool?.handler({ memberNumber: 11 }, {
-        conn,
-        participants,
-        config: {},
-    } as never);
+    const toolCtx = { conn, participants, config: {} } as never;
+    await assignTool?.handler({ memberNumber: 11 }, toolCtx);
+    await activity
+        .getTools()
+        .find((t) => t.name === "markRiddleResult")
+        ?.handler({ memberNumber: 11, correct: true }, toolCtx);
+    // Re-assign so a *current* riddle is in flight as well.
+    await assignTool?.handler({ memberNumber: 11 }, toolCtx);
 
     const builder = new ContextBuilder(40, 200, participants);
     builder.setActivities([activity], () => ctx);
@@ -629,17 +693,127 @@ async function testRegistryAndContext(): Promise<void> {
         snapshot.includes("current riddle:"),
     );
     check(
-        "snapshot includes the riddle leaderboard section",
-        snapshot.includes("Riddles (goal 5 solved):"),
+        "snapshot includes the leaderboard section",
+        snapshot.includes("Riddle leaderboard"),
     );
     check(
-        "annotation sits next to the character, not at the end",
+        "the leaderboard is labelled as standings only",
+        snapshot.includes("standings only"),
+    );
+    check(
+        "annotation sits next to the character, before the leaderboard",
         snapshot.indexOf("RIDDLE PLAYER") <
-            snapshot.indexOf("Riddles (goal 5 solved):"),
+            snapshot.indexOf("Riddle leaderboard"),
+    );
+    check(
+        "progress is not duplicated in the leaderboard-only section",
+        (snapshot.match(/current riddle:/g) ?? []).length === 1,
+    );
+    check(
+        "no empty 'nobody is working' filler",
+        !snapshot.includes("Nobody is currently working"),
     );
 
     await activity.stop();
     await rm("riddles.test.state.json", { force: true });
+}
+
+function testRestraintSlots(): void {
+    console.log("\nRestraint slot block");
+
+    // A character wearing a few things, with an empty slot in between and one
+    // group (`Mask`) that the catalog does not classify as `Item`.
+    // `getData()` is used by vibratorState, so the stub items provide it.
+    const stubItem = (Group: string, Name: string) => ({
+        Group,
+        Name,
+        getData: () => ({}),
+    });
+    const worn: Record<string, ReturnType<typeof stubItem>> = {
+        ItemMouth: stubItem("ItemMouth", "BallGag"),
+        ItemNeck: stubItem("ItemNeck", "SpikeCollar"),
+        Mask: stubItem("Mask", "HalfMask"),
+    };
+    const char = {
+        MemberNumber: 42,
+        Name: "Slots",
+        NickName: "Slots",
+        Description: "",
+        Pose: [],
+        MapPos: { X: 0, Y: 0 },
+        Appearance: {
+            InventoryGet: (g: string) => worn[g],
+            allItems: () => Object.values(worn),
+        },
+        upperBodyStyle: () => "female" as const,
+        lowerBodyStyle: () => "female" as const,
+        hasPenis: () => false,
+        IsRestrained: () => true,
+        CanTalk: () => false,
+    };
+
+    const slots = restraintSlots(char as never);
+    for (const group of ITEM_GROUPS) {
+        check(
+            `${group} is present in the slot list`,
+            slots.includes(group),
+            `missing from ${slots.length} slots`,
+        );
+    }
+    check(
+        "a worn group outside Category Item is still present",
+        slots.includes("Mask"),
+    );
+    check("no slot is listed twice", new Set(slots).size === slots.length);
+    check(
+        "ITEM_GROUPS entries keep their catalog order",
+        slots.slice(0, ITEM_GROUPS.length).join(",") === ITEM_GROUPS.join(","),
+    );
+
+    const block = describeRestraintSlots(char as never);
+    const text = block.join("\n");
+    check(
+        "the block states that every slot is listed",
+        text.includes("every slot is listed"),
+    );
+    check(
+        "an empty slot renders as an em dash",
+        block.some((l) => l.endsWith("—")),
+    );
+
+    const mouthRows = block.filter((l) => l.includes("ItemMouth"));
+    equal(
+        "the three mouth slots are all reported separately",
+        mouthRows.length,
+        3,
+    );
+    check(
+        "the worn mouth slot shows its item",
+        block.some((l) => /ItemMouth\s+BallGag/.test(l)),
+    );
+    check(
+        "the other two mouth slots are empty",
+        block.filter((l) => /ItemMouth[23]\s+—/.test(l)).length === 2,
+    );
+
+    // `restrained`/`gagged` flags were dropped: the slots carry that truth.
+    const description = describeCharacter(char as never, 200);
+    check(
+        "the description no longer asserts a restrained flag",
+        !description.includes("restrained"),
+    );
+    check(
+        "the description no longer asserts a gagged flag",
+        !description.includes("gagged"),
+    );
+    check(
+        "the description keeps the summary on its first line",
+        description.split("\n")[0].includes("Slots (member #42)"),
+    );
+    check(
+        "the slot block follows the summary",
+        description.split("\n")[1]?.includes("restraints") ?? false,
+    );
 }
 
 async function main(): Promise<void> {
@@ -650,6 +824,7 @@ async function main(): Promise<void> {
     await testRealCsv();
     await testActivityIntegration();
     await testRegistryAndContext();
+    testRestraintSlots();
 
     console.log(`\n${passed} passed, ${failed} failed`);
     if (failed > 0) process.exit(1);

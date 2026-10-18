@@ -53,9 +53,15 @@ export function createGetSingleRiddleTool(
         ),
         handler: (args, ctx) => {
             const target = resolvePlayer(ctx, args);
-            const exclude = target ? state.solvedIds(target.memberNumber) : [];
-            const [picked] = pickRandomRiddles(options.pool, 1, exclude);
+            const solved = target ? state.solvedIds(target.memberNumber) : [];
+            const recent = target
+                ? state.recentOffered(target.memberNumber)
+                : [];
+            const [picked] = pickRandomRiddles(options.pool, 1, solved, recent);
             if (!picked) return "No riddles available.";
+            if (target) {
+                state.markOffered(target.memberNumber, [picked.id]);
+            }
 
             const shouldAssign =
                 args.assign === undefined ? !!target : args.assign === true;

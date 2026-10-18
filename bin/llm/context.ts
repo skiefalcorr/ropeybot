@@ -63,8 +63,7 @@ export function decodeDescription(raw: string): string {
  */
 export function messageContent(message: BC_Server_ChatRoomMessage): string {
     const dict = message.Dictionary as
-        | { Tag?: string; Text?: unknown }[]
-        | undefined;
+        { Tag?: string; Text?: unknown }[] | undefined;
     if (Array.isArray(dict)) {
         const entry = dict.find((e) => e?.Tag === "msg");
         if (entry && typeof entry.Text === "string" && entry.Text.length > 0) {
@@ -91,7 +90,7 @@ export function botDisclaimer(config: LLMConfig): string {
         `It shows emotes for current state: code when LLM thinks, wardrobe when it looks up items, and listening when it waits to begin its turn. \n` +
         `To allow the bot to react to you, write /bot start. And say or do something. \n` +
         `Available commands: /bot start, /bot stop, /bot status, /bot feedback. \n` +
-        `Safewords are: "${config.safewords.join(',')}" \n\n` +
+        `Safewords are: "${config.safewords.join(",")}" \n\n` +
         `Source code is at https://github.com/skiefalcorr/ropeybot`
     );
 }
@@ -152,7 +151,8 @@ export class ContextBuilder {
     /** Activities contributing prompt material, in registration order. */
     private activities: LLMActivity[] = [];
     /** Provider for the live ActivityContext handed to activity hooks. */
-    private activityContext: (() => ActivityContext | undefined) | undefined = undefined;
+    private activityContext: (() => ActivityContext | undefined) | undefined =
+        undefined;
 
     constructor(
         private maxHistory: number = 40,
@@ -434,8 +434,86 @@ function genderLabel(char: API_Character): string | undefined {
     return undefined;
 }
 
+/** Rendered for a restraint slot with nothing in it. */
+const EMPTY_SLOT = "—";
+
 /**
- * Produce a one-line description of a character's current state.
+ * Every restraint slot worth reporting, in a stable order.
+ *
+ * This is the union of:
+ *  - `ITEM_GROUPS`, so an empty slot is always represented; and
+ *  - any item group actually present on the character, so a slot that the
+ *    catalog classifies outside `Category: "Item"` (e.g. `Mask`) can never be
+ *    silently dropped.
+ *
+ * Order is `ITEM_GROUPS` order with any extra groups appended alphabetically,
+ * so the block is stable across turns and the model can rely on it.
+ */
+export function restraintSlots(char: API_Character): string[] {
+    const worn: string[] = [];
+    try {
+        for (const item of char.Appearance.allItems()) {
+            const group = String(item.Group ?? "");
+            if (!group) continue;
+            if (group === "Mask" || group.startsWith("Item")) {
+                worn.push(group);
+            }
+        }
+    } catch {
+        // A partially-synced appearance must not break the summary.
+    }
+
+    const ordered: string[] = [];
+    const seen = new Set<string>();
+    for (const group of ITEM_GROUPS) {
+        if (seen.has(group)) continue;
+        seen.add(group);
+        ordered.push(group);
+    }
+    for (const group of [...new Set(worn)].sort()) {
+        if (seen.has(group)) continue;
+        seen.add(group);
+        ordered.push(group);
+    }
+    return ordered;
+}
+
+/**
+ * Render the restraint slots as an aligned block, one row per slot.
+ *
+ * Every slot is always present, with {@link EMPTY_SLOT} when nothing is worn,
+ * so the model can tell "empty" from "not reported" without having to
+ * remember which groups exist. Aligned columns and own lines are used rather
+ * than a markdown table because the character summary itself is a
+ * `|`-separated line — pipes inside it would nest unreadably.
+ */
+export function describeRestraintSlots(char: API_Character): string[] {
+    const slots = restraintSlots(char);
+    if (slots.length === 0) return [];
+
+    const rows = slots.map((group) => {
+        const item = char.Appearance.InventoryGet(group as never);
+        if (!item) return { group, value: EMPTY_SLOT };
+        const vibe = vibratorState(item);
+        return {
+            group,
+            value: vibe ? `${item.Name} [vibe:${vibe}]` : item.Name,
+        };
+    });
+
+    const width = Math.max(...rows.map((r) => r.group.length));
+    return [
+        "restraints (every slot is listed; — means empty):",
+        ...rows.map((r) => `  ${r.group.padEnd(width)}  ${r.value}`),
+    ];
+}
+
+/**
+ * Produce a description of a character's current state.
+ *
+ * The first line is the compact `|`-separated summary; restraint slots follow
+ * as their own aligned block (see {@link describeRestraintSlots}). Callers
+ * that need a single line can use everything before the first newline.
  */
 export function describeCharacter(
     char: API_Character,
@@ -460,21 +538,6 @@ export function describeCharacter(
     const pose = char.Pose.map((p) => p.Name).join(", ");
     if (pose) parts.push(`pose: ${pose}`);
 
-    // const items = char.Appearance.allItems()
-    //     .filter((i) => i.Group.startsWith("Item"))
-    //     .map((i) => i.Name);
-    // if (items.length > 0) parts.push(`items: ${items.join(", ")}`);
-
-    const items = ITEM_GROUPS.filter((i) =>
-        char.Appearance.InventoryGet(i as never),
-    ).map((i) => {
-        const item = char.Appearance.InventoryGet(i as never);
-        if (!item) return i;
-        const vibe = vibratorState(item);
-        return vibe ? `${i}:${item.Name} [vibe:${vibe}]` : `${i}:${item.Name}`;
-    });
-    if (items.length > 0) parts.push(`items: ${items.join(", ")}`);
-
     const wearing = CLOTHING_GROUPS.filter((g) =>
         char.Appearance.InventoryGet(g as never),
     ).map((g) => {
@@ -483,14 +546,17 @@ export function describeCharacter(
     });
     if (wearing.length > 0) parts.push(`wearing: ${wearing.join(", ")}`);
 
+    // `restrained` and `gagged` are intentionally NOT included: both are
+    // derivable from the slot block below, and a summary flag disagreeing
+    // with the table would be worse than either alone.
     if (isNaked(char)) parts.push("naked");
-    if (char.IsRestrained()) parts.push("restrained");
-    if (!char.CanTalk()) parts.push("gagged");
 
     const pos = char.MapPos;
     if (pos && (pos.X !== 0 || pos.Y !== 0)) {
         parts.push(`at (${pos.X}, ${pos.Y})`);
     }
 
-    return parts.join(" | ");
+    const summary = parts.join(" | ");
+    const slots = describeRestraintSlots(char);
+    return slots.length > 0 ? [summary, ...slots].join("\n") : summary;
 }

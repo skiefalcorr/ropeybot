@@ -44,6 +44,12 @@ export interface RiddlePlayerRecord {
     attempts: number;
     /** Ids of every riddle this player has solved. */
     solvedIds: string[];
+    /**
+     * Recently handed-out riddle ids, newest last. Used to avoid offering the
+     * same riddle twice in a row when the model draws a batch but only asks
+     * one of them. Capped, so this is a recency buffer, not history.
+     */
+    recentOffered?: string[];
     /** How many riddles this player gave up on. */
     failedCount: number;
     /** Epoch ms the current riddle was assigned. */
@@ -72,6 +78,9 @@ export interface RiddleGoalReached {
  * either initiated by an LLM tool call or by an explicit player-facing
  * command, never inferred from raw chat text.
  */
+/** How many recently-offered ids to remember per player. */
+const RECENT_OFFERED_LIMIT = 40;
+
 export class RiddleState {
     private players = new Map<number, RiddlePlayerRecord>();
     private onChange: (() => void) | undefined;
@@ -138,6 +147,36 @@ export class RiddleState {
     /** Ids this player has already solved, for excluding from the pool. */
     solvedIds(memberNumber: number): string[] {
         return [...(this.players.get(memberNumber)?.solvedIds ?? [])];
+    }
+
+    /**
+     * Riddle ids recently handed to this player, newest last. Used to avoid
+     * offering the same riddle twice in a row when only one riddle of a drawn
+     * batch was actually asked.
+     */
+    recentOffered(memberNumber: number): string[] {
+        return [...(this.players.get(memberNumber)?.recentOffered ?? [])];
+    }
+
+    /**
+     * Remember that these riddles were just offered to a player. Keeps the
+     * buffer bounded, dropping the oldest entries first. Re-offering an id
+     * moves it to the end rather than duplicating it.
+     */
+    markOffered(memberNumber: number, riddleIds: Iterable<string>): void {
+        const record = this.players.get(memberNumber);
+        if (!record) return;
+        const buffer = record.recentOffered ?? [];
+        for (const id of riddleIds) {
+            const existing = buffer.indexOf(id);
+            if (existing !== -1) buffer.splice(existing, 1);
+            buffer.push(id);
+        }
+        if (buffer.length > RECENT_OFFERED_LIMIT) {
+            buffer.splice(0, buffer.length - RECENT_OFFERED_LIMIT);
+        }
+        record.recentOffered = buffer;
+        this.changed();
     }
 
     /**
@@ -337,6 +376,11 @@ export class RiddleState {
                 attempts: raw.attempts ?? 0,
                 solvedIds: Array.isArray(raw.solvedIds)
                     ? [...new Set(raw.solvedIds)]
+                    : [],
+                recentOffered: Array.isArray(raw.recentOffered)
+                    ? [...new Set(raw.recentOffered)].slice(
+                          -RECENT_OFFERED_LIMIT,
+                      )
                     : [],
                 failedCount: raw.failedCount ?? 0,
                 askedAt: raw.askedAt,

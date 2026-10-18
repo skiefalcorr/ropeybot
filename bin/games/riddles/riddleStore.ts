@@ -194,23 +194,8 @@ export async function loadRiddles(
     return { riddles, skipped, duplicates };
 }
 
-/**
- * Pick `count` distinct random riddles from `pool`, excluding any id present
- * in `exclude` when possible. Falls back to allowing solved riddles only when
- * the unsolved pool is smaller than `count`, so a player who has solved most
- * of the table still gets a riddle instead of an empty result.
- */
-export function pickRandomRiddles(
-    pool: Riddle[],
-    count: number,
-    exclude: Iterable<string> = [],
-): Riddle[] {
-    if (pool.length === 0 || count <= 0) return [];
-    const excluded = new Set(exclude);
-    const fresh = pool.filter((r) => !excluded.has(r.id));
-    const source = fresh.length >= count ? fresh : pool;
-
-    // Partial Fisher-Yates: shuffle just enough of a copy to take `count`.
+/** Shuffle in place using a partial Fisher-Yates, then take up to `count`. */
+function takeRandom(source: Riddle[], count: number): Riddle[] {
     const copy = [...source];
     const take = Math.min(count, copy.length);
     for (let i = 0; i < take; i++) {
@@ -218,4 +203,59 @@ export function pickRandomRiddles(
         [copy[i], copy[j]] = [copy[j], copy[i]];
     }
     return copy.slice(0, take);
+}
+
+/**
+ * Pick up to `count` distinct random riddles, filling the request in tiers so
+ * the caller always gets `count` back when the table allows it.
+ *
+ *  1. riddles the player has never solved and was not just offered — the
+ *     normal case;
+ *  2. topped up from riddles they were recently offered but have not solved
+ *     (better to repeat something from ten turns ago than to return short);
+ *  3. topped up from everything left, which only happens once a player has
+ *     solved most of the table.
+ *
+ * Tiers 2 and 3 are top-ups, not replacements: tier 1 selections are always
+ * kept in full. Tier 3 can therefore re-offer an already-solved riddle, but
+ * only when there is genuinely nothing else left.
+ */
+export function pickRandomRiddles(
+    pool: Riddle[],
+    count: number,
+    solved: Iterable<string> = [],
+    recentlyOffered: Iterable<string> = [],
+): Riddle[] {
+    if (pool.length === 0 || count <= 0) return [];
+
+    const solvedSet = new Set(solved);
+    const recentSet = new Set(recentlyOffered);
+    const chosen: Riddle[] = [];
+    const chosenIds = new Set<string>();
+
+    /**
+     * Top up `chosen` from `candidates`, skipping ids already picked. Solved
+     * riddles are filtered out unless `allowSolved` is set — tier 3 is the
+     * only caller that needs them.
+     */
+    const addFrom = (candidates: Riddle[], allowSolved = false): void => {
+        if (chosen.length >= count) return;
+        const usable = candidates.filter(
+            (r) =>
+                (allowSolved || !solvedSet.has(r.id)) && !chosenIds.has(r.id),
+        );
+        for (const riddle of takeRandom(usable, count - chosen.length)) {
+            chosen.push(riddle);
+            chosenIds.add(riddle.id);
+        }
+    };
+
+    // Tier 1: never solved, not recently offered.
+    addFrom(pool.filter((r) => !recentSet.has(r.id)));
+    // Tier 2: never solved, ignoring the recency buffer.
+    addFrom(pool);
+    // Tier 3: anything left, including riddles already solved.
+    addFrom(pool, true);
+
+    return chosen;
 }
