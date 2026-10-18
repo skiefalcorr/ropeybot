@@ -20,6 +20,11 @@ import { LLMConfig } from "../../config";
  * A single tool the LLM may invoke. `definition` is the OpenAI/llama-server
  * tool schema; `handler` executes it and returns a short result string that
  * is fed back to the model as the tool result.
+ *
+ * Tools declare their own meta-behaviour instead of being named in lists
+ * inside the agent. That way an activity can contribute a tool and have it
+ * treated correctly (turn-blocking, history persistence) without any edit to
+ * the agent.
  */
 export interface Tool {
     name: string;
@@ -33,6 +38,40 @@ export interface Tool {
         args: Record<string, unknown>,
         ctx: ToolContext,
     ) => Promise<string> | string;
+
+    /**
+     * Read-only information gathering. The model is expected to act on the
+     * result, so `endTurn` in the same batch is refused, and the agent shows
+     * the "Wardrobe" emoticon while it considers the results.
+     */
+    lookup?: boolean;
+
+    /**
+     * The result must be inspected before the turn ends — e.g. a room change
+     * the server may have rejected. Implied by {@link lookup}.
+     */
+    blocksEndTurn?: boolean;
+
+    /**
+     * Persist this tool's result into the rolling cross-turn history as an
+     * assistant entry. Without it the result only lives in the current turn's
+     * tool message and is forgotten on the next turn.
+     *
+     *  - `"action"`     — a physical/state change (item applied, verdict
+     *                     recorded); rendered as an assistant action line.
+     *  - `"roomChange"` — the bot moved between rooms.
+     */
+    history?: "action" | "roomChange";
+}
+
+/**
+ * Whether calling this tool must prevent the model from ending the turn in
+ * the same batch. `lookup` implies it, since there is no point gathering
+ * information and immediately ending the turn without using it.
+ */
+export function blocksEndTurn(tool: Tool | undefined): boolean {
+    if (!tool) return false;
+    return tool.blocksEndTurn === true || tool.lookup === true;
 }
 
 export interface ToolContext {
@@ -97,10 +136,9 @@ export interface PronounSet {
  * inferred from the character's appearance: a character with a penis is treated
  * as male, otherwise female. Returns a neutral set if the character is unknown.
  */
-export function pronounsFor(
-    char: API_Character | undefined,
-): PronounSet {
-    if (!char) return { possessive: "their", self: "themselves", object: "them" };
+export function pronounsFor(char: API_Character | undefined): PronounSet {
+    if (!char)
+        return { possessive: "their", self: "themselves", object: "them" };
     if (char.hasPenis()) {
         return { possessive: "his", self: "himself", object: "him" };
     }

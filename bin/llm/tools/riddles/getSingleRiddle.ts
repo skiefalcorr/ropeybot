@@ -32,6 +32,8 @@ export function createGetSingleRiddleTool(
     return {
         name: "getSingleRiddle",
         category: "riddles",
+        lookup: true,
+        history: "action",
         definition: def(
             "getSingleRiddle",
             "Get one random riddle and (by default) assign it to a player in one step. Use this when you want a simple flow: one riddle, already tracked for that player, so you can just ask it.",
@@ -63,22 +65,15 @@ export function createGetSingleRiddleTool(
                     `Riddle: ${picked.question}`,
                     `Answer: ${picked.answer}`,
                     `Id: ${picked.id}`,
-                    "",
-                    "Not assigned to anyone yet. Use assignRiddle when you give it to a player.",
                 ].join("\n");
             }
 
             state.assign(target.memberNumber, target.name, picked);
-            options.note(
-                `Riddle assigned to ${target.name}: "${picked.question}" (answer: ${picked.answer}).`,
-            );
             return [
                 `Riddle assigned to ${target.name} (${state.progressText(target.memberNumber)}):`,
                 `"${picked.question}"`,
                 `Answer: ${picked.answer}`,
                 `Id: ${picked.id}`,
-                "",
-                "Ask it in character. When they guess, call markRiddleResult.",
             ].join("\n");
         },
     };

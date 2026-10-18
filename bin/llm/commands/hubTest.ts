@@ -24,6 +24,10 @@
 
 import { CommandHub, CORE_OWNER, DEFAULT_SECTION } from "./hub";
 import type { CommandContribution } from "./types";
+import { blocksEndTurn, type Tool } from "../tools/shared";
+import { buildTools } from "../tools";
+import { RiddleState } from "../../games/riddles/riddleState";
+import { createRiddleTools } from "../tools/riddles";
 
 let passed = 0;
 let failed = 0;
@@ -313,11 +317,94 @@ async function testDispatch(): Promise<void> {
     equal("disposed hub stays silent", replies.length, settled);
 }
 
+function testToolMetadata(): void {
+    console.log("\nTool metadata flags");
+
+    // Base tools carry the flags the agent used to hardcode in three lists.
+    const byName = new Map<string, Tool>(buildTools().map((t) => [t.name, t]));
+
+    for (const name of ["listItems", "listClothing", "listPoses"]) {
+        check(`${name} is a lookup tool`, byName.get(name)?.lookup === true);
+    }
+    for (const name of ["createRoom", "joinRoom", "leaveRoom"]) {
+        const tool = byName.get(name);
+        check(
+            `${name} blocks endTurn and persists as a room change`,
+            blocksEndTurn(tool) && tool?.history === "roomChange",
+        );
+    }
+    for (const name of [
+        "addItem",
+        "removeItem",
+        "stripAll",
+        "setVibrator",
+        "sendShock",
+        "lockItem",
+    ]) {
+        check(
+            `${name} persists as an action`,
+            byName.get(name)?.history === "action",
+        );
+    }
+
+    check(
+        "sendMessage does not block endTurn",
+        !blocksEndTurn(byName.get("sendMessage")),
+    );
+    check("an unflagged tool does not block", !blocksEndTurn({} as never));
+    check(
+        "lookup implies blocking even without blocksEndTurn",
+        blocksEndTurn({ lookup: true } as never),
+    );
+
+    // Riddle tools: contributed by an activity, flagged with no agent edits.
+    const state = new RiddleState(5);
+    const riddleTools = createRiddleTools(state, {
+        pool: [{ id: "r1", question: "Q", answer: "a" }],
+        defaultBatchSize: 3,
+        revealAnswers: true,
+    });
+    const riddles = new Map<string, Tool>(riddleTools.map((t) => [t.name, t]));
+
+    for (const name of ["getRiddles", "getSingleRiddle", "getRiddleStatus"]) {
+        check(`${name} is a lookup tool`, riddles.get(name)?.lookup === true);
+    }
+    for (const name of [
+        "getSingleRiddle",
+        "assignRiddle",
+        "markRiddleResult",
+        "clearRiddle",
+    ]) {
+        check(
+            `${name} persists as an action`,
+            riddles.get(name)?.history === "action",
+        );
+    }
+    check(
+        "getRiddles is a pure read (no history)",
+        riddles.get("getRiddles")?.history === undefined,
+    );
+    check(
+        "getRiddleStatus is a pure read (no history)",
+        riddles.get("getRiddleStatus")?.history === undefined,
+    );
+    check(
+        "getSingleRiddle both blocks endTurn and persists",
+        blocksEndTurn(riddles.get("getSingleRiddle")) &&
+            riddles.get("getSingleRiddle")?.history === "action",
+    );
+    check(
+        "all riddle tools carry the riddles category",
+        riddleTools.every((t) => t.category === "riddles"),
+    );
+}
+
 async function main(): Promise<void> {
     testHelpVisibility();
     testDedupAndOrdering();
     testEmptyHelp();
     await testDispatch();
+    testToolMetadata();
 
     console.log(`\n${passed} passed, ${failed} failed`);
     if (failed > 0) process.exit(1);

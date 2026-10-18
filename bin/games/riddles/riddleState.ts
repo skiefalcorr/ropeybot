@@ -130,9 +130,8 @@ export class RiddleState {
 
     hasSolved(memberNumber: number, riddleId: string): boolean {
         return (
-            this.players
-                .get(memberNumber)
-                ?.solvedIds.includes(riddleId) ?? false
+            this.players.get(memberNumber)?.solvedIds.includes(riddleId) ??
+            false
         );
     }
 

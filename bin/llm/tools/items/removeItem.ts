@@ -25,6 +25,7 @@ import {
 
 export const removeItemTool: Tool = {
     name: "removeItem",
+    history: "action",
     definition: def(
         "removeItem",
         "Remove an item from a character by group. Use listItems (restraints/BDSM) or listClothing (clothing/body) to find valid group names.",

@@ -19,40 +19,19 @@ import {
     type RoomDefinition,
 } from "bc-bot";
 import { LLMClient, LLMChatOptions, LLMMessage } from "./llmClient";
-import { buildTools, resolveTools, Tool, ToolContext, displayName } from "./tools";
+import {
+    buildTools,
+    resolveTools,
+    Tool,
+    ToolContext,
+    displayName,
+} from "./tools";
+import { blocksEndTurn } from "./tools/shared";
 import { ContextBuilder, messageContent, type HistoryEntry } from "./context";
 import { LLMLogger } from "./llmLogger";
 import { LLMConfig } from "../config";
 import type { ActivityContext, LLMActivity } from "./activities/types";
 import { CommandHub } from "./commands/hub";
-
-/**
- * Read-only catalog lookup tools. Calling endTurn in the same batch as one of
- * these is ignored, since the model typically still needs to act on the
- * results it just looked up.
- */
-const LOOKUP_TOOLS = ["listItems", "listClothing", "listPoses"];
-
-/**
- * Room-changing tools. Calling endTurn in the same batch as one of these is
- * ignored, since the model should first verify the room change actually took
- * effect (the server may reject it, or the bot may still be in the old room).
- */
-const ROOM_CHANGE_TOOLS = ["createRoom", "joinRoom", "leaveRoom"];
-
-/**
- * Tools that perform physical actions on characters. Their results are
- * persisted into the rolling history so the model remembers what it did
- * across turns (item add/remove, shocks, vibrator changes, locks).
- */
-const ACTION_TOOLS = new Set([
-    "addItem",
-    "removeItem",
-    "stripAll",
-    "setVibrator",
-    "sendShock",
-    "lockItem",
-]);
 
 /**
  * The LLM agent. It ingests room events, coalesces them with a debounce
@@ -192,10 +171,8 @@ export class LLMAgent {
             note: (content: string) =>
                 this.contextBuilder.recordSystem(content),
             pushEvent: (content: string) => this.onEvent(content),
-            log: (message: string) =>
-                console.log(`[activity] ${message}`),
-            warn: (message: string) =>
-                console.warn(`[activity] ${message}`),
+            log: (message: string) => console.log(`[activity] ${message}`),
+            warn: (message: string) => console.warn(`[activity] ${message}`),
         };
         return this.activityContext;
     }
@@ -226,7 +203,8 @@ export class LLMAgent {
         for (const activity of activities) {
             for (const tool of activity.getTools()) {
                 if (denied.has(tool.name)) continue;
-                if (allowed.length > 0 && !allowed.includes(tool.name)) continue;
+                if (allowed.length > 0 && !allowed.includes(tool.name))
+                    continue;
                 if (this.toolMap.has(tool.name)) {
                     console.warn(
                         `[activities] Tool '${tool.name}' from '${activity.id}' collides with an existing tool; skipping.`,
@@ -238,7 +216,10 @@ export class LLMAgent {
             }
         }
 
-        this.contextBuilder.setActivities(activities, () => this.activityContext);
+        this.contextBuilder.setActivities(
+            activities,
+            () => this.activityContext,
+        );
 
         for (const activity of activities) {
             try {
@@ -497,11 +478,11 @@ export class LLMAgent {
         //     });
         // }
         messages.push({
-                role: "user",
-                content:
-                    //"Continue the roleplay. Act if something feels appropriate, or stay silent.",
-                    "Respond in character. Use tools for everything. But you can write OOC messages in parentheses (Like this) if you want."
-            });
+            role: "user",
+            content:
+                //"Continue the roleplay. Act if something feels appropriate, or stay silent.",
+                "Respond in character. Use tools for everything. But you can write OOC messages in parentheses (Like this) if you want.",
+        });
 
         const maxIterations = this.config.maxToolIterations ?? 5;
         const toolDefs = this.tools.map((t) => t.definition);
@@ -566,13 +547,21 @@ export class LLMAgent {
                 // Execute each tool call and append the results.
                 // If endTurn is chained with a lookup tool (listItems etc.) in the
                 // same batch, ignore it and remind the model to act first.
-                const batchNames = new Set(
-                    result.toolCalls.map((c) => c.function.name),
+                const batchNames = new Set<string>(
+                    result.toolCalls.map((c) => String(c.function.name)),
                 );
-                const hasLookup = LOOKUP_TOOLS.some((t) => batchNames.has(t));
-                const hasRoomChange = ROOM_CHANGE_TOOLS.some((t) =>
-                    batchNames.has(t),
+                // Which tools in this batch forbid ending the turn, and why.
+                // Derived from the tools themselves, so an activity's tools
+                // participate without any edit here.
+                const blockingLookup = [...batchNames].filter(
+                    (n) => this.toolMap.get(n)?.lookup,
                 );
+                const blockingOther = [...batchNames].filter((n) => {
+                    const tool = this.toolMap.get(n);
+                    return tool && !tool.lookup && blocksEndTurn(tool);
+                });
+                const hasLookup = blockingLookup.length > 0;
+                const hasBlocking = hasLookup || blockingOther.length > 0;
                 let endTurnRequested = false;
                 const toolCallDelayMs = this.config.toolCallDelayMs ?? 500;
                 for (let i = 0; i < result.toolCalls.length; i++) {
@@ -615,28 +604,26 @@ export class LLMAgent {
                         );
                     }
 
-                    // Record physical actions so the LLM remembers what it
-                    // did across turns (the tool result is already a
-                    // human-readable summary; failures are recorded too).
-                    if (ACTION_TOOLS.has(name)) {
-                        this.contextBuilder.recordAction(resultText);
-                    }
-
-                    // Record room changes (createRoom/joinRoom/leaveRoom) so
-                    // the LLM remembers where it went across turns. The tool
-                    // result is already a human-readable summary.
-                    if (ROOM_CHANGE_TOOLS.includes(name)) {
-                        this.contextBuilder.recordRoomChange(resultText);
-                    }
+                    // Persist the result across turns when the tool asks for
+                    // it, so the model remembers what it did.
+                    this.recordToolHistory(name, resultText);
 
                     if (name === "endTurn") {
-                        if (hasRoomChange) {
+                        if (hasBlocking) {
+                            const parts: string[] = [];
+                            if (blockingLookup.length > 0) {
+                                parts.push(
+                                    `lookup tool(s): ${blockingLookup.join(", ")}`,
+                                );
+                            }
+                            if (blockingOther.length > 0) {
+                                parts.push(
+                                    `tool(s) whose result must be checked: ${blockingOther.join(", ")}`,
+                                );
+                            }
                             resultText =
-                                "endTurn ignored: you called a room-changing tool (createRoom/joinRoom/leaveRoom) in this batch. First check the tool result to confirm the room change really worked as intended (the server may have rejected it), then call endTurn.";
-                            console.log(`  -> ${resultText}`);
-                        } else if (hasLookup) {
-                            resultText =
-                                "endTurn ignored: you called a lookup tool (listItems/listClothing/listPoses) in this batch. Perform your intended action first, then call endTurn.";
+                                `endTurn ignored: this batch called ${parts.join(" and ")}. ` +
+                                "Inspect the result(s) first, then end the turn with a separate endTurn call.";
                             console.log(`  -> ${resultText}`);
                         } else {
                             endTurnRequested = true;
@@ -782,7 +769,8 @@ export class LLMAgent {
      * participant also releases their leash if held.
      */
     setParticipant(memberNumber: number, participating: boolean): void {
-        const changed = this.ctx.participants.has(memberNumber) !== participating;
+        const changed =
+            this.ctx.participants.has(memberNumber) !== participating;
         if (participating) {
             this.ctx.participants.add(memberNumber);
         } else {
@@ -873,15 +861,22 @@ export class LLMAgent {
         this.recordToolLog("manual", name, args, result);
         // Persist physical actions into the rolling history the same way
         // LLM-driven calls are, so the model remembers them across turns.
-        if (ACTION_TOOLS.has(name)) {
+        this.recordToolHistory(name, result);
+        return result;
+    }
+
+    /**
+     * Persist a tool result into the rolling history when the tool declares
+     * it should survive across turns. Single implementation shared by the
+     * LLM-driven loop and manual `!tool` calls, so the two cannot drift.
+     */
+    private recordToolHistory(name: string, result: string): void {
+        const kind = this.toolMap.get(name)?.history;
+        if (kind === "action") {
             this.contextBuilder.recordAction(result);
-        }
-        // Persist room changes the same way, so manual !tool room calls are
-        // remembered across turns too.
-        if (ROOM_CHANGE_TOOLS.includes(name)) {
+        } else if (kind === "roomChange") {
             this.contextBuilder.recordRoomChange(result);
         }
-        return result;
     }
 
     /**

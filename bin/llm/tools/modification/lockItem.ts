@@ -25,6 +25,7 @@ import {
 
 export const lockItemTool: Tool = {
     name: "lockItem",
+    history: "action",
     definition: def(
         "lockItem",
         "Lock an item on a character so it cannot be removed (requires the item to support locking).",

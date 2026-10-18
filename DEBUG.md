@@ -188,6 +188,49 @@ the file resets everyone.
 - The leaderboard and any in-flight riddles go at the end of the snapshot
   (`roomStateSections`).
 
+### Tool metadata
+
+A tool declares how the agent should treat it, instead of the agent naming it
+in a hardcoded list. This is what lets an activity contribute a tool that
+blocks `endTurn` or persists to history with no edit to `agent.ts`.
+
+| Field                   | Effect                                                                                                                         |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `lookup: true`          | Read-only. `endTurn` in the same batch is refused, and the "Wardrobe" emoticon is shown while the model considers the results. |
+| `blocksEndTurn: true`   | The result must be inspected before ending the turn (e.g. a room change the server may reject). Implied by `lookup`.           |
+| `history: "action"`     | Persist the result into the rolling cross-turn history as an assistant action.                                                 |
+| `history: "roomChange"` | Same, tagged as a room change.                                                                                                 |
+
+Without `history`, a result lives only in the current turn's tool message and
+is forgotten on the next turn.
+
+Current assignments:
+
+| Tools                                                                                                                          | Flags                                     |
+| ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
+| `listItems`, `listClothing`, `listPoses`, `getRiddles`, `getRiddleStatus`                                                      | `lookup`                                  |
+| `getSingleRiddle`                                                                                                              | `lookup` + `history: "action"`            |
+| `createRoom`, `joinRoom`, `leaveRoom`                                                                                          | `blocksEndTurn` + `history: "roomChange"` |
+| `addItem`, `removeItem`, `stripAll`, `setVibrator`, `sendShock`, `lockItem`, `assignRiddle`, `markRiddleResult`, `clearRiddle` | `history: "action"`                       |
+
+The `endTurn` refusal names the tools actually present in the batch, so it
+stays accurate as tools are added.
+
+### Tool results must not contain instructions
+
+Tool results report state; they do not tell the model what to do next. The
+model reads the result and decides on its own.
+
+- **Successful results:** facts only — never "now call X", "ask this in
+  character", or "congratulate them".
+- **Error results:** may include a short recovery hint (e.g. `Use listItems to
+find valid names`). An error with no hint risks the same mistake looping,
+  and errors never reach history anyway.
+
+History is written once per tool, from the tool result, via the `history`
+flag. Tools do not push history entries themselves — there is no second
+channel to keep in sync.
+
 ### Command hub
 
 `/bot` commands are resolved by `CommandHub`, not by `CommandParser` directly.

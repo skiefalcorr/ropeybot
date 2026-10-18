@@ -34,7 +34,10 @@ import type { ActivityContext } from "../../llm/activities/types";
 import type { CommandHub } from "../../llm/commands/hub";
 import type { Tool } from "../../llm/tools/shared";
 import { rm } from "node:fs/promises";
-import { buildActivities, enabledActivityIds } from "../../llm/activities/registry";
+import {
+    buildActivities,
+    enabledActivityIds,
+} from "../../llm/activities/registry";
 import { ContextBuilder } from "../../llm/context";
 
 let passed = 0;
@@ -126,9 +129,11 @@ function testPicking(): void {
     );
 
     const excluded = pickRandomRiddles(pool, 1, ["a", "b"]);
-    equal("excludes solved when enough remain", excluded.map((r) => r.id), [
-        "c",
-    ]);
+    equal(
+        "excludes solved when enough remain",
+        excluded.map((r) => r.id),
+        ["c"],
+    );
 
     // With only one unsolved riddle left but two requested, the fallback
     // widens the pool rather than returning a short list.
@@ -161,7 +166,11 @@ function testStateMachine(): void {
 
     state.assign(1, "Alice", riddle);
     equal("assign -> asked", state.peek(1)?.state, "asked");
-    equal("assign records the question", state.peek(1)?.question, riddle.question);
+    equal(
+        "assign records the question",
+        state.peek(1)?.question,
+        riddle.question,
+    );
 
     const wrong = state.markResult(1, false);
     equal("wrong guess keeps it asked", wrong?.outcome, "wrong");
@@ -198,16 +207,26 @@ function testStateMachine(): void {
         })(),
     );
 
-    equal("board puts the most solves first", state.leaderboard()[0].name, "Alice");
+    equal(
+        "board puts the most solves first",
+        state.leaderboard()[0].name,
+        "Alice",
+    );
     equal("board entry solved count", state.leaderboard()[0].solved, 3);
 
     state.clearRiddle(1);
     equal("clearRiddle -> idle", state.peek(1)?.state, "idle");
     equal("clearRiddle keeps progress", state.solvedCount(1), 3);
 
-    check("goalReached lists Alice", state.goalReached().some((g) => g.name === "Alice"));
+    check(
+        "goalReached lists Alice",
+        state.goalReached().some((g) => g.name === "Alice"),
+    );
 
-    check("first greet is reported as such", state.markGreeted(9, "Dan") === true);
+    check(
+        "first greet is reported as such",
+        state.markGreeted(9, "Dan") === true,
+    );
     check("second greet is not", state.markGreeted(9, "Dan") === false);
     check("wasGreeted reflects it", state.wasGreeted(9));
 
@@ -230,7 +249,11 @@ async function testRealCsv(): Promise<void> {
     console.log("\nReal riddle table");
 
     const { riddles, duplicates } = await loadRiddles();
-    check("loaded riddles from the real CSV", riddles.length > 300, `got ${riddles.length}`);
+    check(
+        "loaded riddles from the real CSV",
+        riddles.length > 300,
+        `got ${riddles.length}`,
+    );
     // The CSV contains near-duplicates with different wording, which are
     // legitimately distinct riddles. Only exact repeats are dropped.
     check("duplicate count is reported", duplicates >= 0, `got ${duplicates}`);
@@ -280,7 +303,11 @@ async function testActivityIntegration(): Promise<void> {
 
     const ctx = {
         conn,
-        llmConfig: { url: "http://localhost", persona: "test", botName: "Riddlebot" },
+        llmConfig: {
+            url: "http://localhost",
+            persona: "test",
+            botName: "Riddlebot",
+        },
         toolContext: {
             conn,
             participants,
@@ -306,7 +333,10 @@ async function testActivityIntegration(): Promise<void> {
 
     await activity.init(ctx);
 
-    check("activity loaded the riddle pool", activity.getRiddlePoolSize() > 300);
+    check(
+        "activity loaded the riddle pool",
+        activity.getRiddlePoolSize() > 300,
+    );
     equal("activity registered its command", registered, ["riddles"]);
     equal("activity exposed six tools", activity.getTools().length, 6);
     check(
@@ -315,10 +345,19 @@ async function testActivityIntegration(): Promise<void> {
     );
 
     const section = activity.systemSections().join("\n");
-    check("system section mentions markRiddleResult", section.includes("markRiddleResult"));
-    check("system section warns against leaking answers", /Never reveal a riddle's answer/.test(section));
+    check(
+        "system section mentions markRiddleResult",
+        section.includes("markRiddleResult"),
+    );
+    check(
+        "system section warns against leaking answers",
+        /Never reveal a riddle's answer/.test(section),
+    );
 
-    check("bio advertises the command", (activity.bioAddendum() ?? "").includes("/bot riddles"));
+    check(
+        "bio advertises the command",
+        (activity.bioAddendum() ?? "").includes("/bot riddles"),
+    );
 
     // Entry whisper: first time = intro, second time = welcome back.
     activity.onCharacterEntered(ctx, alice as never);
@@ -360,12 +399,22 @@ async function testActivityIntegration(): Promise<void> {
         player: "Alice",
         memberNumber: 11,
     });
-    check("getSingleRiddle assigns a riddle", single.includes("Riddle assigned to Alice"));
-    equal("assignment is tracked in the state", activity.getState().peek(11)?.state, "asked");
+    check(
+        "getSingleRiddle assigns a riddle",
+        single.includes("Riddle assigned to Alice"),
+    );
+    equal(
+        "assignment is tracked in the state",
+        activity.getState().peek(11)?.state,
+        "asked",
+    );
 
     const annotations = activity.characterAnnotations(ctx);
     const aliceLines = annotations.get(11) ?? [];
-    check("Alice gets a priority annotation", aliceLines[0]?.includes("RIDDLE PLAYER") ?? false);
+    check(
+        "Alice gets a priority annotation",
+        aliceLines[0]?.includes("RIDDLE PLAYER") ?? false,
+    );
     check(
         "the annotation includes the current riddle and answer",
         aliceLines.some((l) => l.includes("current riddle:")) &&
@@ -379,7 +428,11 @@ async function testActivityIntegration(): Promise<void> {
         guessedAnswer: "nope",
     });
     check("a wrong guess is recorded", wrong.includes("wrong guess"));
-    equal("a wrong guess keeps the player asked", activity.getState().peek(11)?.state, "asked");
+    equal(
+        "a wrong guess keeps the player asked",
+        activity.getState().peek(11)?.state,
+        "asked",
+    );
 
     const solved = await run("markRiddleResult", {
         memberNumber: 11,
@@ -389,23 +442,41 @@ async function testActivityIntegration(): Promise<void> {
     check("a correct guess reports a solve", solved.includes("SOLVED"));
     equal("solving updates progress", activity.getState().solvedCount(11), 1);
 
-    check("verdicts push system notes", notes.length >= 2);
+    // History is no longer written by the tools themselves; they declare it
+    // via the tool metadata and the agent persists the result.
+    check(
+        "verdict tools declare action history",
+        ["assignRiddle", "markRiddleResult", "getSingleRiddle", "clearRiddle"]
+            .map((n) => tools.get(n)?.history)
+            .every((h) => h === "action"),
+    );
+    check(
+        "read-only riddle tools do not declare history",
+        tools.get("getRiddles")?.history === undefined &&
+            tools.get("getRiddleStatus")?.history === undefined,
+    );
+    check("tools no longer write history via note", notes.length === 0);
 
     const status = await run("getRiddleStatus", {});
     check("status lists a leaderboard", status.includes("leaderboard"));
 
     // Command behaviour: opts the player in, stays private.
-    const reply = activity
-        .registerCommands
+    const reply = activity.registerCommands
         ? (() => {
               const call = (activity as never as Record<string, unknown>)
-                  .onCommandRiddles as (s: unknown, a: string[]) => string | string[];
+                  .onCommandRiddles as (
+                  s: unknown,
+                  a: string[],
+              ) => string | string[];
               return call.call(activity, bob, []);
           })()
         : "";
     const replyText = Array.isArray(reply) ? reply.join("\n") : reply;
     check("command opts the player into roleplay", participants.has(22));
-    check("command tells them they can chat", replyText.includes("now chatting with me"));
+    check(
+        "command tells them they can chat",
+        replyText.includes("now chatting with me"),
+    );
 
     // Reset.
     activity.reset();
@@ -424,7 +495,11 @@ async function testRegistryAndContext(): Promise<void> {
 
     // Registry: no config => nothing enabled; riddles enabled via the
     // activities map; explicit false disables even the shorthand.
-    equal("no config enables nothing", enabledActivityIds({ url: "x", persona: "x" }), []);
+    equal(
+        "no config enables nothing",
+        enabledActivityIds({ url: "x", persona: "x" }),
+        [],
+    );
     equal(
         "activities map enables riddles",
         enabledActivityIds({
@@ -520,14 +595,24 @@ async function testRegistryAndContext(): Promise<void> {
     const assignTool = activity
         .getTools()
         .find((t) => t.name === "getSingleRiddle");
-    await assignTool?.handler({ memberNumber: 11 }, { conn, participants, config: {} } as never);
+    await assignTool?.handler({ memberNumber: 11 }, {
+        conn,
+        participants,
+        config: {},
+    } as never);
 
     const builder = new ContextBuilder(40, 200, participants);
     builder.setActivities([activity], () => ctx);
 
     const system = builder.buildSystemPrompt("You are a test bot.");
-    check("system prompt keeps the persona", system.startsWith("You are a test bot."));
-    check("system prompt includes the riddle rules", system.includes("## Riddle side-game"));
+    check(
+        "system prompt keeps the persona",
+        system.startsWith("You are a test bot."),
+    );
+    check(
+        "system prompt includes the riddle rules",
+        system.includes("## Riddle side-game"),
+    );
     check(
         "system prompt mentions the private command",
         system.includes("/bot riddles"),

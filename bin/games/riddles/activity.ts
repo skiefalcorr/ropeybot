@@ -94,7 +94,6 @@ export class RiddlesActivity implements LLMActivity {
             pool: this.pool,
             defaultBatchSize: this.config.defaultBatchSize ?? 5,
             revealAnswers,
-            note: (content) => this.ctx?.note(content),
         });
 
         this.registerCommands(ctx);

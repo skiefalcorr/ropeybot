@@ -35,6 +35,7 @@ export function createMarkRiddleResultTool(
     return {
         name: "markRiddleResult",
         category: "riddles",
+        history: "action",
         definition: def(
             "markRiddleResult",
             "Record your verdict on a player's guess for their current riddle. You decide whether it is correct — the canonical answer is shown in the room state. Set giveUp when the player gives up or you reveal the answer.",
@@ -89,39 +90,26 @@ export function createMarkRiddleResultTool(
                     : "";
 
             if (result.outcome === "solved") {
-                options.note(
-                    `${target.name} solved their riddle (${result.solved}/${result.goal} solved).${guess}${reason}`,
-                );
                 const lines = [
-                    `${target.name} SOLVED it.${guess}`,
+                    `${target.name} SOLVED their riddle.${guess}${reason}`,
                     `Progress: ${result.solved}/${result.goal} solved.`,
                 ];
-                lines.push(
-                    result.goalReached
-                        ? `They reached the goal of ${result.goal}! Congratulate them and offer a fresh challenge or a reward.`
-                        : "Clear the riddle with clearRiddle or assign the next one.",
-                );
+                if (result.goalReached) {
+                    lines.push(`Goal of ${result.goal} reached.`);
+                }
                 return lines.join("\n");
             }
 
             if (result.outcome === "failed") {
-                options.note(
-                    `${target.name} gave up on their riddle (${result.record.failedCount} given up total).${reason}`,
-                );
                 return [
-                    `Marked as failed for ${target.name}.`,
+                    `Marked as failed for ${target.name}.${reason}`,
                     `Progress: ${result.solved}/${result.goal} solved, ${result.record.failedCount} given up.`,
-                    "Reveal the answer in character if you have not already, then offer a new riddle.",
                 ].join("\n");
             }
 
-            options.note(
-                `${target.name} guessed wrong (attempt ${result.record.attempts}).${guess}${reason}`,
-            );
             return [
-                `Recorded a wrong guess from ${target.name}.${guess}`,
+                `Recorded a wrong guess from ${target.name}.${guess}${reason}`,
                 `Attempt ${result.record.attempts} on this riddle. Progress: ${result.solved}/${result.goal} solved.`,
-                "You may hint or let them keep trying.",
             ].join("\n");
         },
     };

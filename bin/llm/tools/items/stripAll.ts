@@ -25,6 +25,7 @@ import {
 
 export const stripAllTool: Tool = {
     name: "stripAll",
+    history: "action",
     definition: def(
         "stripAll",
         "Remove ALL clothing from a character, applied one-by-one with pacing to avoid anti-cheat. Does not remove restraints.",

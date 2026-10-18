@@ -27,6 +27,7 @@ import { validateAsset } from "../catalog";
 
 export const addItemTool: Tool = {
     name: "addItem",
+    history: "action",
     definition: def(
         "addItem",
         "Add an item (restraint, clothing, etc.) to a character. Use listItems (restraints/BDSM) or listClothing (clothing/body) to find valid group/asset names. The item is automatically colored; pass color1/color2 to override. Optionally set a craft name/description so the item shows up as a named craft. Avoid using hoods - they are mostly ugly.",

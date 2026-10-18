@@ -36,6 +36,7 @@ export function createGetRiddlesTool(
     return {
         name: "getRiddles",
         category: "riddles",
+        lookup: true,
         definition: def(
             "getRiddles",
             "Get N random riddles from the table to choose from. Each result has an id, the question, and the canonical answer. Use the id when calling assignRiddle. Optionally pass a player to exclude riddles they already solved.",
@@ -67,8 +68,6 @@ export function createGetRiddlesTool(
             return [
                 `Got ${picked.length} riddle(s)${note}:`,
                 ...picked.map(formatRiddle),
-                "",
-                "Ask one of these to a player, then call assignRiddle so their progress tracks it.",
             ].join("\n");
         },
     };

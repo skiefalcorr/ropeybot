@@ -30,6 +30,7 @@ export function createGetRiddleStatusTool(
     return {
         name: "getRiddleStatus",
         category: "riddles",
+        lookup: true,
         definition: def(
             "getRiddleStatus",
             "Check riddle progress: for one player (with their current riddle and answer) or for everyone (leaderboard). Use it before asking a riddle, or when a player asks how they are doing.",

@@ -63,7 +63,13 @@ export function isVibrator(item: API_AppearanceItem): boolean {
     const hasMode = prop?.Mode !== undefined;
     const hasIntensity = prop?.Intensity !== undefined;
 
-    return hasVibratorName || hasExtended || hasTypeRecord || hasMode || hasIntensity;
+    return (
+        hasVibratorName ||
+        hasExtended ||
+        hasTypeRecord ||
+        hasMode ||
+        hasIntensity
+    );
 }
 
 /**
@@ -82,7 +88,9 @@ export function vibratorState(item: API_AppearanceItem): string | null {
 
     // Try Intensity
     if (typeof prop.Intensity === "number") {
-        return INTENSITY_LABELS[prop.Intensity] ?? `Intensity ${prop.Intensity}`;
+        return (
+            INTENSITY_LABELS[prop.Intensity] ?? `Intensity ${prop.Intensity}`
+        );
     }
 
     // Try Extended.Type (typed vibrators store intensity as a string)
@@ -121,13 +129,19 @@ function readCurrentIntensity(item: API_AppearanceItem): number {
 
     // Try Mode (some vibrators store numeric mode)
     if (prop?.Mode !== undefined) {
-        const n = typeof prop.Mode === "string" ? parseInt(prop.Mode) : (prop.Mode as unknown as number);
+        const n =
+            typeof prop.Mode === "string"
+                ? parseInt(prop.Mode)
+                : (prop.Mode as unknown as number);
         if (!isNaN(n)) return n;
     }
 
     // Try Intensity
     if (prop?.Intensity !== undefined) {
-        const n = typeof prop.Intensity === "string" ? parseInt(prop.Intensity) : prop.Intensity;
+        const n =
+            typeof prop.Intensity === "string"
+                ? parseInt(prop.Intensity)
+                : prop.Intensity;
         if (!isNaN(n)) return n;
     }
 
@@ -139,7 +153,10 @@ function readCurrentIntensity(item: API_AppearanceItem): number {
  * (mirrors the working CatDogSystem escalateVibrator logic).
  * Returns true if any method succeeded.
  */
-function applyIntensity(item: API_AppearanceItem, newIntensity: number): boolean {
+function applyIntensity(
+    item: API_AppearanceItem,
+    newIntensity: number,
+): boolean {
     const prop = item.getData().Property;
 
     // Method 1: Extended.SetType for typed vibrators
@@ -155,7 +172,10 @@ function applyIntensity(item: API_AppearanceItem, newIntensity: number): boolean
     // Method 2: setProperty for TypeRecord-based vibrators
     if (prop?.TypeRecord !== undefined) {
         try {
-            const typeRecord = { ...(prop.TypeRecord as Record<string, number>), v: newIntensity };
+            const typeRecord = {
+                ...(prop.TypeRecord as Record<string, number>),
+                v: newIntensity,
+            };
             item.setProperty("TypeRecord", typeRecord as never);
             if (prop.Effect.includes("Vibrating") === false) {
                 prop.Effect.push("Vibrating");
@@ -173,6 +193,7 @@ function applyIntensity(item: API_AppearanceItem, newIntensity: number): boolean
 
 export const setVibratorTool: Tool = {
     name: "setVibrator",
+    history: "action",
     definition: def(
         "setVibrator",
         "Control a vibrator item already worn by a character: set its intensity level and/or mode. The character must already have the item in the given group. ",
@@ -194,13 +215,7 @@ export const setVibratorTool: Tool = {
             },
             mode: {
                 type: "string",
-                enum: [
-                    "Random",
-                    "Escalate",
-                    "Tease",
-                    "Deny",
-                    "Edge",
-                ],
+                enum: ["Random", "Escalate", "Tease", "Deny", "Edge"],
                 description:
                     "Vibrator mode, e.g. 'Random', 'Escalate', 'Tease', 'Deny', 'Edge'. Random mode randomizes intensity over time.",
             },
@@ -228,7 +243,7 @@ export const setVibratorTool: Tool = {
 
         // Verify it's actually a vibrator
         //if (!isVibrator(item))
-            //return `Item '${group}:${item.Name}' does not appear to be a controllable vibrator.`;
+        //return `Item '${group}:${item.Name}' does not appear to be a controllable vibrator.`;
 
         if (intensity === undefined && mode === undefined)
             return "Nothing to do: provide 'intensity' and/or 'mode'.";
@@ -257,11 +272,7 @@ export const setVibratorTool: Tool = {
                 "Action" as never,
                 `VibeModeActionIncreaseTo${intensity}`,
                 undefined,
-                [
-                    { SourceCharacter: botMember },
-                    destinationEntry,
-                    assetEntry,
-                ],
+                [{ SourceCharacter: botMember }, destinationEntry, assetEntry],
             );
         }
 
@@ -272,11 +283,7 @@ export const setVibratorTool: Tool = {
                 "Action" as never,
                 `VibeModeAction${mode}`,
                 undefined,
-                [
-                    { SourceCharacter: botMember },
-                    destinationEntry,
-                    assetEntry,
-                ],
+                [{ SourceCharacter: botMember }, destinationEntry, assetEntry],
             );
         }
 

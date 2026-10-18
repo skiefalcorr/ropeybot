@@ -17,6 +17,8 @@ import { Tool, def, checkRateLimit, pingLeashed } from "../shared";
 export const joinRoomTool: Tool = {
     name: "joinRoom",
     category: "room",
+    blocksEndTurn: true,
+    history: "roomChange",
     definition: def(
         "joinRoom",
         "Leave the current room and join another room by its exact name. Use searchRooms to find valid room names first. The bot will be in the new room afterwards. If you want to take anyone with you, you need to leash them first.",

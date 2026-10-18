@@ -30,6 +30,7 @@ export function createClearRiddleTool(
     return {
         name: "clearRiddle",
         category: "riddles",
+        history: "action",
         definition: def(
             "clearRiddle",
             "Clear a finished riddle so the player is ready for the next one. Optional — assigning a new riddle clears the old one automatically.",

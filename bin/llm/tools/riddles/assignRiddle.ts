@@ -34,6 +34,7 @@ export function createAssignRiddleTool(
     return {
         name: "assignRiddle",
         category: "riddles",
+        history: "action",
         definition: def(
             "assignRiddle",
             "Record which riddle a player has been given. Pass riddleId from getRiddles, or raw question+answer if you invented your own riddle. This starts tracking their progress on it.",
@@ -70,9 +71,6 @@ export function createAssignRiddleTool(
                     return `Error: no riddle with id '${riddleId}'. Call getRiddles to see valid ids.`;
                 }
                 state.assign(target.memberNumber, target.name, riddle);
-                options.note(
-                    `Riddle assigned to ${target.name}: "${riddle.question}" (answer: ${riddle.answer}).`,
-                );
                 return [
                     `Recorded: ${target.name} is now solving "${riddle.question}" (answer: ${riddle.answer}).`,
                     `Progress: ${state.progressText(target.memberNumber)}.`,
@@ -96,9 +94,6 @@ export function createAssignRiddleTool(
                 question,
                 answer,
             });
-            options.note(
-                `Riddle assigned to ${target.name}: "${question}" (answer: ${answer}).`,
-            );
             return [
                 `Recorded: ${target.name} is now solving "${question}" (answer: ${answer}).`,
                 `Progress: ${state.progressText(target.memberNumber)}.`,

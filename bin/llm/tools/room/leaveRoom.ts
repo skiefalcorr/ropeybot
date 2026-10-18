@@ -17,6 +17,8 @@ import { Tool, def, checkRateLimit } from "../shared";
 export const leaveRoomTool: Tool = {
     name: "leaveRoom",
     category: "room",
+    blocksEndTurn: true,
+    history: "roomChange",
     definition: def(
         "leaveRoom",
         "Leave the current room. The bot will be outside any room afterwards and can join another with joinRoom or create one with createRoom.",

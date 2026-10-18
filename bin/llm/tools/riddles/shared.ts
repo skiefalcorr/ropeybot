@@ -25,6 +25,10 @@ import type { RiddleState } from "../../../games/riddles/riddleState";
  * tools) because their handlers close over the activity's live state and
  * riddle pool. This keeps `ToolContext` free of riddle-specific fields and
  * lets a second activity never collide with these tools.
+ *
+ * Note: there is deliberately no `note()` here. Tool results reach the
+ * cross-turn history through the tool's own `history` flag, so history has
+ * exactly one source of truth per tool.
  */
 export interface RiddleToolOptions {
     /** The full riddle pool, loaded from the CSV. */
@@ -37,11 +41,6 @@ export interface RiddleToolOptions {
      * the tool result text.
      */
     revealAnswers: boolean;
-    /**
-     * Push a system note into the model's history, so the next turn remembers
-     * what just happened (e.g. a verdict was recorded).
-     */
-    note(content: string): void;
 }
 
 /**
