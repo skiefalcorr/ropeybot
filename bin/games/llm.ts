@@ -39,6 +39,7 @@ import {
     type ActivityDictionary,
 } from "../llm/activityDictionary";
 import { CommandHub, CORE_OWNER } from "../llm/commands/hub";
+import type { CommandContribution } from "../llm/commands/types";
 import {
     buildActivities,
     enabledActivityIds,
@@ -101,6 +102,7 @@ export class LLMGame extends LogicBase {
             name: string,
             help: string,
             handler: Parameters<CommandHub["register"]>[0]["handler"],
+            extra: Partial<CommandContribution> = {},
         ) =>
             this.commandHub.register({
                 name,
@@ -108,28 +110,58 @@ export class LLMGame extends LogicBase {
                 priority: 0,
                 help,
                 handler,
+                ...extra,
             });
 
-        reg("start", "Start roleplaying with the bot.", (c) =>
-            this.onCommandStart(c.sender, c.message),
+        // `/bot help` lists every command that declares help, filtered for the
+        // sender. Always whispered: a wall of command text does not belong in
+        // public chat.
+        reg(
+            "help",
+            "Show this list of commands.",
+            (c) =>
+                this.commandHub.helpText({
+                    isSuperuser: this.isSuperuser(c.sender),
+                }),
+            { private: true },
+        );
+
+        reg(
+            "start",
+            "Start roleplaying with the bot — I will reply to you.",
+            (c) => this.onCommandStart(c.sender, c.message),
         );
         reg("stop", "Stop roleplaying with the bot.", (c) =>
             this.onCommandStop(c.sender, c.message),
         );
-        reg("status", "List current participants.", () =>
+        reg("status", "List current participants and enabled activities.", () =>
             this.onCommandStatus(),
         );
-        reg("tools", "List the LLM's available tools (superuser).", (c) =>
-            this.onCommandTools(c.sender, c.message),
+        reg(
+            "feedback",
+            "Send a note to the bot's operator.",
+            (c) => this.onCommandFeedback(c.sender, c.message),
+            { usage: "<text>" },
         );
-        reg("tool", "Invoke a tool directly (superuser).", (c) =>
-            this.onCommandTool(c.sender, c.message),
+
+        // Operator commands: hidden from the listing for everyone else.
+        reg(
+            "tools",
+            "List the LLM's available tools.",
+            (c) => this.onCommandTools(c.sender, c.message),
+            { superuserOnly: true },
         );
-        reg("toolstatus", "Rate-limit and leash state (superuser).", (c) =>
-            this.onCommandToolStatus(c.sender, c.message),
+        reg(
+            "tool",
+            "Invoke a tool directly, bypassing the LLM.",
+            (c) => this.onCommandTool(c.sender, c.message),
+            { superuserOnly: true, usage: "<name> [key=value ...]" },
         );
-        reg("feedback", "Send feedback to the bot's operator.", (c) =>
-            this.onCommandFeedback(c.sender, c.message),
+        reg(
+            "toolstatus",
+            "Rate-limit and leash state.",
+            (c) => this.onCommandToolStatus(c.sender, c.message),
+            { superuserOnly: true },
         );
     }
 
@@ -267,7 +299,7 @@ export class LLMGame extends LogicBase {
         _msg: BC_Server_ChatRoomMessage,
     ): string => {
         this.agent.setParticipant(sender.MemberNumber, true);
-        const safewords = (this.llmConfig.safewords).join(", ");
+        const safewords = this.llmConfig.safewords.join(", ");
         return (
             `Welcome, ${displayName(sender)}! You can now RP with me — say something or poke/pet me.\n` +
             `It takes me around 1 minute to reply. \n` +
@@ -436,10 +468,7 @@ export class LLMGame extends LogicBase {
 
         // If a character removes the leash they were holding on the bot,
         // drop them from the leashed map so we stop pinging them.
-        if (
-            message.Type === "Hidden" &&
-            message.Content === "RemoveLeash"
-        ) {
+        if (message.Type === "Hidden" && message.Content === "RemoveLeash") {
             this.agent.dropLeash(sender.MemberNumber);
             return;
         }
@@ -713,13 +742,9 @@ function extractActivityText(
             : undefined;
 
     const sourceChar =
-        source !== undefined
-            ? conn.chatRoom?.getCharacter(source)
-            : undefined;
+        source !== undefined ? conn.chatRoom?.getCharacter(source) : undefined;
     const targetChar =
-        target !== undefined
-            ? conn.chatRoom?.getCharacter(target)
-            : undefined;
+        target !== undefined ? conn.chatRoom?.getCharacter(target) : undefined;
 
     // Preferred: render the template from ActivityDictionary.csv. The CSV is
     // keyed by the message Content (e.g. "ChatSelf-ItemArms-Wiggle"), not by
@@ -784,8 +809,10 @@ function extractActionText(
     // Each dictionary entry is self-named via a `Tag` field, with the data
     // in sibling fields, e.g. { Tag: 'NextAsset', AssetName, GroupName } or
     // { Tag: 'DestinationCharacter', MemberNumber, Text }.
-    const dict = (message.Dictionary ??
-        []) as unknown as Record<string, unknown>[];
+    const dict = (message.Dictionary ?? []) as unknown as Record<
+        string,
+        unknown
+    >[];
     const byTag = (tag: string) => dict.find((e) => e.Tag === tag);
 
     const assetTag =
@@ -801,12 +828,11 @@ function extractActionText(
         typeof destEntry?.MemberNumber === "number"
             ? conn.chatRoom?.getCharacter(destEntry.MemberNumber)
             : undefined;
-    const targetName =
-        targetChar ? displayName(targetChar) : destEntry?.Text;
+    const targetName = targetChar ? displayName(targetChar) : destEntry?.Text;
     if (!targetName) return undefined;
 
     const verb = message.Content === "ActionUse" ? "applied" : "removed";
-    return `${targetName} had ${groupName}:${assetName} ${verb} by ${
-        displayName(sender)
-    }.`;
+    return `${targetName} had ${groupName}:${assetName} ${verb} by ${displayName(
+        sender,
+    )}.`;
 }

@@ -197,20 +197,69 @@ text; the hub sends one assembled reply. This is what lets an activity add
 to `/bot status` or override it, and what keeps `/bot riddles` private via
 `private: true`.
 
+Each contribution can carry advertising metadata:
+
+| Field           | Effect                                                                                                |
+| --------------- | ----------------------------------------------------------------------------------------------------- |
+| `help`          | One-line description. Omit it to keep the command out of `/bot help` (aliases, internal hooks).       |
+| `usage`         | Suffix shown after the name, e.g. `"<text>"` → `/bot feedback <text>`.                                |
+| `section`       | Help grouping. Defaults to `"General"`, which is always listed first; the rest follow alphabetically. |
+| `superuserOnly` | Hide from `/bot help` unless the sender is a superuser.                                               |
+| `private`       | Send the assembled reply as a whisper instead of a public reply.                                      |
+
+### `/bot help`
+
+Lists commands dynamically from the hub — nothing is hardcoded, so enabling an
+activity adds its section automatically. Always replied as a **private
+whisper**: a wall of command text does not belong in public chat.
+
+Filtering:
+
+- contributions without `help` are never listed;
+- `superuserOnly` commands (`tools`, `tool`, `toolstatus`) appear **only** for
+  superusers, so the operator surface never leaks to regular players;
+- several contributions to the same command collapse to one line (the base
+  definition wins);
+- grouped by section, `General` first, alphabetical within each section.
+
+A regular player sees:
+
+```
+Available commands:
+
+[General]
+/bot feedback <text> — Send a note to the bot's operator.
+/bot help — Show this list of commands.
+/bot start — Start roleplaying with the bot — I will reply to you.
+/bot status — List current participants and enabled activities.
+/bot stop — Stop roleplaying with the bot.
+
+[Riddles]
+/bot riddles [top|reset] — Your riddle progress (also opts you into roleplay).
+```
+
+A superuser additionally gets `tool`, `tools` and `toolstatus` under `[General]`.
+
 `/bot status` lists participants plus the enabled activity names only — all
 riddle detail is behind `/bot riddles`.
 
-## Offline riddle tests
+## Offline tests
 
 No BC connection or LLM needed:
 
 ```
-npx tsx bin/games/riddles/riddleTest.ts
+npx tsx bin/games/riddles/riddleTest.ts    # riddle mode
+npx tsx bin/llm/commands/hubTest.ts        # command hub
 ```
 
-Covers the CSV parser (quotes, commas in quotes, CRLF, BOM, embedded
-newlines), stable ids, de-duplication, random picking and every state-machine
-transition.
+The riddle suite covers the CSV parser (quotes, commas in quotes, CRLF, BOM,
+embedded newlines), stable ids, de-duplication, random picking, every
+state-machine transition, the activity's tools end to end, registry gating and
+context injection.
+
+The hub suite covers `/bot help` visibility (superuser filtering, de-duping,
+section grouping and ordering), the empty-listing case, and the
+replace/append/priority/private dispatch rules.
 
 ## Gotchas
 

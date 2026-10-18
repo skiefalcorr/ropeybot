@@ -161,6 +161,10 @@ Each activity contributes its own LLM tools, prompt sections, `/bot` commands,
 event hooks and a line in the bot bio. Disabling an activity removes all of
 that without touching the rest of the bot.
 
+Players can type `/bot help` (replied privately) to get the current command
+list, which is generated from the enabled commands and filtered per sender —
+superuser-only commands never appear for regular players.
+
 **Riddle mode** (`riddles`): the bot hands out riddles from
 `bin/games/riddles/riddles.csv` and tracks each player's progress. The LLM
 judges guesses itself — it sees the canonical answer and calls

@@ -137,9 +137,9 @@ export class RiddlesActivity implements LLMActivity {
         const board = this.state.leaderboard(5);
         const lines: string[] = [`Riddles (goal ${goal} solved):`];
 
-        const active = this.state.all().filter(
-            (p) => p.record.state === "asked",
-        );
+        const active = this.state
+            .all()
+            .filter((p) => p.record.state === "asked");
         if (active.length === 0) {
             lines.push("- Nobody is currently working on a riddle.");
         } else {
@@ -170,9 +170,7 @@ export class RiddlesActivity implements LLMActivity {
      * Attach a status line under each character that has ever interacted with
      * the riddle game, and mark active players as priority for roleplay.
      */
-    characterAnnotations(
-        ctx: ActivityContext,
-    ): Map<number, string[]> {
+    characterAnnotations(ctx: ActivityContext): Map<number, string[]> {
         const map = new Map<number, string[]>();
         const room = ctx.conn.chatRoom;
         if (!room) return map;
@@ -200,9 +198,13 @@ export class RiddlesActivity implements LLMActivity {
                             : ""),
                 );
             } else if (record?.state === "solved") {
-                lines.push("just solved their last riddle — ready for the next one");
+                lines.push(
+                    "just solved their last riddle — ready for the next one",
+                );
             } else if (record?.state === "failed") {
-                lines.push("gave up on their last riddle — ready for the next one");
+                lines.push(
+                    "gave up on their last riddle — ready for the next one",
+                );
             } else if (record) {
                 lines.push("idle — no riddle assigned yet");
             }
@@ -213,7 +215,10 @@ export class RiddlesActivity implements LLMActivity {
 
     bioAddendum(): string | undefined {
         if (this.config.bioLine) {
-            return this.config.bioLine.replace(/\{cmd\}/g, `/bot ${DEFAULT_COMMAND}`);
+            return this.config.bioLine.replace(
+                /\{cmd\}/g,
+                `/bot ${DEFAULT_COMMAND}`,
+            );
         }
         return `Riddles: write /bot ${DEFAULT_COMMAND} to play riddles with me.`;
     }
@@ -228,6 +233,8 @@ export class RiddlesActivity implements LLMActivity {
             owner: this.id,
             priority: 10,
             private: true,
+            section: this.title,
+            usage: "[top|reset]",
             help: "Your riddle progress (also opts you into roleplay).",
             handler: ({ sender, args }) => this.onCommandRiddles(sender, args),
         });
@@ -292,7 +299,9 @@ export class RiddlesActivity implements LLMActivity {
                 `Wrong attempts so far: ${record.attempts}. Answer in chat whenever you like.`,
             );
         } else if (record.state === "solved") {
-            lines.push("You just solved your last riddle. Ask for the next one!");
+            lines.push(
+                "You just solved your last riddle. Ask for the next one!",
+            );
         } else if (record.state === "failed") {
             lines.push(
                 "You gave up on the last one. Ask for a fresh riddle whenever you want.",
@@ -313,12 +322,15 @@ export class RiddlesActivity implements LLMActivity {
      * returning player gets their progress instead of the full intro.
      */
     onCharacterEntered(ctx: ActivityContext, character: API_Character): void {
+        const me = ctx.conn.Player;
+        const currentNick = me.NickName || me.Name;
+
         if (this.config.greetOnEnter === false) return;
         if (character.MemberNumber === ctx.conn.Player.MemberNumber) return;
 
         const name = displayName(character);
         const first = this.state.markGreeted(character.MemberNumber, name);
-        const botName = ctx.llmConfig.botName?.trim() || "me";
+        const botName = ctx.llmConfig.botName?.trim() || currentNick;
 
         if (first) {
             ctx.whisper(

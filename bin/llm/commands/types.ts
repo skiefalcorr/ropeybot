@@ -74,12 +74,32 @@ export interface CommandContribution {
     /**
      * Optional one-line help text, used by the generated help listing so
      * activities can document their commands without editing the core help.
+     * A contribution without `help` is never advertised (e.g. aliases).
      */
     help?: string;
     /**
+     * Optional usage suffix shown after the command name in the help listing,
+     * e.g. `"<text>"` renders as `/bot feedback <text>`.
+     */
+    usage?: string;
+    /**
+     * Help section this command belongs to. Defaults to "General", which is
+     * always listed first; other sections follow alphabetically. Activities
+     * should set their own (e.g. "Riddles") so enabling them adds a section
+     * without the core needing to know about it.
+     */
+    section?: string;
+    /**
+     * Hide this command from `/bot help` unless the sender is a superuser.
+     * Use for operator commands such as `tool` and `toolstatus`; the handlers
+     * enforce authorization themselves, this only controls advertising.
+     */
+    superuserOnly?: boolean;
+    /**
      * When true the handler's reply is always sent as a private Whisper to the
      * sender, regardless of the message type that triggered it. Used by
-     * `/bot riddles`, whose content must never land in public chat.
+     * `/bot riddles` and `/bot help`, whose content should not land in public
+     * chat.
      */
     private?: boolean;
 }

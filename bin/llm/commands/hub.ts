@@ -20,17 +20,35 @@ import {
 } from "bc-bot";
 import { CommandArgs, CommandContribution } from "./types";
 
-export type { CommandArgs, CommandContribution, CommandHandler, CommandMode } from "./types";
+export type {
+    CommandArgs,
+    CommandContribution,
+    CommandHandler,
+    CommandMode,
+} from "./types";
 
 /**
  * Owner tag used by the base LLM bot's own commands.
  */
 export const CORE_OWNER = "core";
 
+/**
+ * Section a command belongs to when it does not declare one. Always listed
+ * first in `/bot help`.
+ */
+export const DEFAULT_SECTION = "General";
+
 interface Registered {
     contribution: CommandContribution;
     /** Monotonic insertion counter, used as a stable tie-breaker. */
     order: number;
+}
+
+/** One line of the generated `/bot help` listing. */
+interface HelpEntry {
+    name: string;
+    help: string;
+    usage?: string;
 }
 
 /**
@@ -114,15 +132,92 @@ export class CommandHub {
     }
 
     /**
-     * Help lines for every contribution that declares `help`, sorted by name.
+     * Build the `/bot help` listing.
+     *
+     * Rules, in order:
+     *  - contributions without `help` are never advertised (aliases, internal
+     *    hooks);
+     *  - `superuserOnly` contributions are included only for superusers, so
+     *    operator commands never leak to regular players;
+     *  - one entry per command name — several contributions to the same
+     *    command (e.g. an `append`) collapse to a single line, preferring the
+     *    one that declares help, then the highest priority;
+     *  - grouped by `section`, "General" first, the rest alphabetically;
+     *  - commands alphabetically within a section.
+     *
+     * Returns ready-to-send lines, or a single "no commands" line if nothing
+     * is visible.
      */
-    helpLines(): string[] {
-        const lines: string[] = [];
-        for (const name of this.commandNames()) {
-            const list = this.contributions.get(name) ?? [];
-            for (const { contribution } of list) {
+    helpText(opts: { isSuperuser: boolean }): string[] {
+        // name -> the contribution that should represent it in the listing.
+        const representative = new Map<
+            string,
+            { contribution: CommandContribution; order: number }
+        >();
+
+        for (const [name, list] of this.contributions) {
+            for (const entry of list) {
+                const { contribution } = entry;
                 if (!contribution.help) continue;
-                lines.push(`/bot ${name} — ${contribution.help}`);
+                if (contribution.superuserOnly && !opts.isSuperuser) continue;
+
+                const current = representative.get(name);
+                if (!current) {
+                    representative.set(name, entry);
+                    continue;
+                }
+                // Prefer a base (`replace`) contribution over an appender, then
+                // the higher priority, so the primary definition wins.
+                const currentIsReplace =
+                    (current.contribution.mode ?? "replace") === "replace";
+                const incomingIsReplace =
+                    (contribution.mode ?? "replace") === "replace";
+                if (incomingIsReplace && !currentIsReplace) {
+                    representative.set(name, entry);
+                } else if (
+                    incomingIsReplace === currentIsReplace &&
+                    (contribution.priority ?? 0) >
+                        (current.contribution.priority ?? 0)
+                ) {
+                    representative.set(name, entry);
+                }
+            }
+        }
+
+        if (representative.size === 0) {
+            return ["No commands are available to you."];
+        }
+
+        // Group by section.
+        const sections = new Map<string, HelpEntry[]>();
+        for (const [name, { contribution }] of representative) {
+            const section = contribution.section ?? DEFAULT_SECTION;
+            const list = sections.get(section) ?? [];
+            list.push({
+                name,
+                help: (contribution.help ?? "").trim(),
+                usage: contribution.usage,
+            });
+            sections.set(section, list);
+        }
+
+        // "General" first, the rest alphabetically.
+        const ordered = [...sections.keys()].sort((a, b) => {
+            if (a === DEFAULT_SECTION) return -1;
+            if (b === DEFAULT_SECTION) return 1;
+            return a.localeCompare(b);
+        });
+
+        const lines: string[] = ["Available commands:"];
+        for (const section of ordered) {
+            const entries = (sections.get(section) ?? []).sort((a, b) =>
+                a.name.localeCompare(b.name),
+            );
+            lines.push("");
+            lines.push(`[${section}]`);
+            for (const entry of entries) {
+                const suffix = entry.usage ? ` ${entry.usage}` : "";
+                lines.push(`/bot ${entry.name}${suffix} — ${entry.help}`);
             }
         }
         return lines;
