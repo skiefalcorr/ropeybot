@@ -24,6 +24,7 @@ import { ITEM_GROUPS } from "./tools/catalog";
 import { vibratorState } from "./tools/modification/setVibrator";
 import { displayName } from "./tools/shared";
 import { LLMConfig } from "../config";
+import type { ActivityContext, LLMActivity } from "./activities/types";
 
 /**
  * Decodes a character description that may be LZ-compressed.
@@ -148,12 +149,29 @@ export interface HistoryEntry {
  */
 export class ContextBuilder {
     private history: HistoryEntry[] = [];
+    /** Activities contributing prompt material, in registration order. */
+    private activities: LLMActivity[] = [];
+    /** Provider for the live ActivityContext handed to activity hooks. */
+    private activityContext: (() => ActivityContext | undefined) | undefined = undefined;
 
     constructor(
         private maxHistory: number = 40,
         private bioLength: number = 2000,
         private participants?: Set<number>,
     ) {}
+
+    /**
+     * Attach the activities whose prompt material should be included.
+     * `getContext` is called lazily (never during construction) so the agent
+     * and activities can reference each other without a cycle.
+     */
+    setActivities(
+        activities: LLMActivity[],
+        getContext: () => ActivityContext | undefined,
+    ): void {
+        this.activities = activities;
+        this.activityContext = getContext;
+    }
 
     /**
      * Record a message from another character into the history.
@@ -300,7 +318,7 @@ export class ContextBuilder {
      * volatile room state so it stays identical across turns.
      */
     buildSystemPrompt(persona: string): string {
-        return [
+        const sections: string[] = [
             persona,
             "",
             "## How you act",
@@ -313,7 +331,18 @@ export class ContextBuilder {
             "- Only interact with participating characters. Characters marked 'not participating' are not playing with you — ignore them.",
             "- When you have finished all actions you want to take this turn, call endTurn tool. Results of other toolcalls are looped back to you in this turn. Don't chain endTurn with other tools, end your turn with a separate call to endTurn.",
             "- Act naturally and in-character. Do not mention tools, prompts, or that you are an AI.",
-        ].join("\n");
+        ];
+
+        // Activity prompt sections are static (no per-turn data), so they stay
+        // part of the cacheable system prompt.
+        for (const activity of this.activities) {
+            const extra = activity.systemSections?.();
+            if (!extra || extra.length === 0) continue;
+            sections.push("");
+            sections.push(...extra);
+        }
+
+        return sections.join("\n");
     }
 
     /**
@@ -332,14 +361,46 @@ export class ContextBuilder {
         const me = conn.Player;
         lines.push(`You are ${describeCharacter(me, this.bioLength)}.`);
 
+        // Activity annotations are keyed by member number and rendered right
+        // under the character they describe, so the model sees "Alice" and
+        // "Alice's riddle" as one block instead of two distant lists.
+        const ctx = this.activityContext?.();
+        const annotations = new Map<number, string[]>();
+        if (ctx) {
+            for (const activity of this.activities) {
+                const map = activity.characterAnnotations?.(ctx);
+                if (!map) continue;
+                for (const [memberNumber, extra] of map) {
+                    const existing = annotations.get(memberNumber) ?? [];
+                    existing.push(...extra);
+                    annotations.set(memberNumber, existing);
+                }
+            }
+        }
+
         for (const char of room.characters) {
             if (char.MemberNumber === me.MemberNumber) continue;
             const participating =
                 !this.participants || this.participants.has(char.MemberNumber);
             lines.push("Next character:");
             lines.push(describeCharacter(char, this.bioLength));
+            const extra = annotations.get(char.MemberNumber);
+            if (extra && extra.length > 0) {
+                lines.push(...extra);
+            }
             if (!participating) {
                 lines.push("(not participating)");
+            }
+        }
+
+        // Activity-wide sections (leaderboards, active riddles, ...) go last so
+        // the per-character picture stays adjacent to each character.
+        if (ctx) {
+            for (const activity of this.activities) {
+                const sections = activity.roomStateSections?.(ctx);
+                if (!sections || sections.length === 0) continue;
+                lines.push("");
+                lines.push(...sections);
             }
         }
 

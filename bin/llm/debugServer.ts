@@ -26,13 +26,16 @@ import { LLMAgent } from "./agent";
  * while it runs against the live server. Binds to 127.0.0.1 only.
  *
  * Endpoints:
- *  - GET  /status   — agent state snapshot (room, participants, rate limit, ...)
- *  - GET  /tools    — all resolved tools with their parameter schemas
- *  - POST /tool     — run a tool directly: { "name": "...", "args": {...} }
- *  - GET  /toollog  — recent tool invocations (LLM + manual), ?limit=N
- *  - GET  /history  — rolling chat/action history fed to the LLM, ?limit=N
- *  - GET  /llmlog   — last N entries of the llmLog JSONL file, ?limit=N
- *  - POST /stop     — shut the bot down (same as SIGINT)
+ *  - GET  /status      — agent state snapshot (room, participants, rate limit, ...)
+ *  - GET  /tools       — all resolved tools with their parameter schemas
+ *  - POST /tool        — run a tool directly: { "name": "...", "args": {...} }
+ *  - GET  /toollog     — recent tool invocations (LLM + manual), ?limit=N
+ *  - GET  /history     — rolling chat/action history fed to the LLM, ?limit=N
+ *  - GET  /llmlog      — last N entries of the llmLog JSONL file, ?limit=N
+ *  - GET  /activities  — enabled activities and their debug snapshots
+ *  - POST /activities/reset — reset one activity: { "id": "..." }
+ *  - GET  /commands    — registered command contributions and help lines
+ *  - POST /stop        — shut the bot down (same as SIGINT)
  */
 export class DebugServer {
     private server: Server;
@@ -102,6 +105,56 @@ export class DebugServer {
                 const limit = this.limitParam(url);
                 const log = this.agent.getToolLog();
                 this.json(res, log.slice(-limit));
+            } else if (req.method === "GET" && path === "/activities") {
+                this.json(
+                    res,
+                    this.agent.getActivities().map((a) => ({
+                        id: a.id,
+                        title: a.title,
+                        toolCount: a.getTools().length,
+                        snapshot: a.debugSnapshot?.(),
+                    })),
+                );
+            } else if (
+                req.method === "POST" &&
+                path === "/activities/reset"
+            ) {
+                const body = await this.readBody(req);
+                let parsed: { id?: unknown };
+                try {
+                    parsed = JSON.parse(body || "{}");
+                } catch {
+                    this.json(
+                        res,
+                        { ok: false, error: "Invalid JSON body." },
+                        400,
+                    );
+                    return;
+                }
+                const id = String(parsed.id ?? "");
+                const activity = this.agent
+                    .getActivities()
+                    .find((a) => a.id === id);
+                if (!activity) {
+                    this.json(
+                        res,
+                        {
+                            ok: false,
+                            error: `No such activity '${id}'.`,
+                            available: this.agent
+                                .getActivities()
+                                .map((a) => a.id),
+                        },
+                        404,
+                    );
+                    return;
+                }
+                activity.reset?.();
+                this.json(res, {
+                    ok: true,
+                    id,
+                    snapshot: activity.debugSnapshot?.(),
+                });
             } else if (req.method === "GET" && path === "/history") {
                 const limit = this.limitParam(url);
                 const history = this.agent.getHistory();

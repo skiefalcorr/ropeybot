@@ -16,6 +16,49 @@ import { type RoomDefinition } from "bc-bot";
 import { type CasinoConfig } from "./games/casino";
 
 /**
+ * Configuration for an optional activity layered on top of the base roleplay
+ * bot. Activities are keyed by id in `LLMConfig.activities`; an activity is
+ * enabled when its key is present and its value is not `false`.
+ */
+export interface ActivityConfig {
+    enabled?: boolean;
+    [key: string]: unknown;
+}
+
+/**
+ * Riddle mode: the bot asks riddles from `bin/games/riddles/riddles.csv` and
+ * tracks each player's progress. The LLM is the sole judge of a guess — it
+ * sees the canonical answer in the room snapshot and calls `markRiddleResult`.
+ */
+export interface RiddlesConfig extends ActivityConfig {
+    /** Number of riddles a player must solve to "finish". @default 10 */
+    goal?: number;
+    /** Path to the riddle table. @default "bin/games/riddles/riddles.csv" */
+    csvPath?: string;
+    /** Path to the persisted progress file. @default "riddles.state.json" */
+    stateFile?: string;
+    /**
+     * Include each player's current riddle answer in the room snapshot so the
+     * LLM can judge guesses. @default true
+     */
+    answersInContext?: boolean;
+    /** How many riddles `getRiddles` returns by default. @default 5 */
+    defaultBatchSize?: number;
+    /**
+     * Whisper every entering character once with the bot intro and a riddle
+     * invite. Returning players get their progress instead. @default true
+     */
+    greetOnEnter?: boolean;
+    /**
+     * Text appended to the bot's bio advertising the mode. `{cmd}` is replaced
+     * with the command name (`/bot riddles`).
+     */
+    bioLine?: string;
+    /** Extra tools exposed beyond the defaults. */
+    extraTools?: string[];
+}
+
+/**
  * Configuration for the LLM-powered roleplay bot.
  *
  * The LLM is expected to be served locally by llama-server, which exposes an
@@ -119,6 +162,17 @@ export interface LLMConfig {
     debugPort?: number;
     /** Optional starting pose(s) applied to the bot itself on init. */
     startPose?: string[];
+    /**
+     * Optional activities layered on top of the base roleplay bot, keyed by
+     * activity id (e.g. `"riddles": { "enabled": true, "goal": 10 }`).
+     * An activity is enabled when its key is present and not `false`.
+     */
+    activities?: Record<string, ActivityConfig | false>;
+    /**
+     * Typed shorthand for the riddle activity. Ignored when
+     * `activities.riddles` is also present.
+     */
+    riddles?: RiddlesConfig;
     /**
      * Optional curated item catalog the LLM may use. If omitted, the bot will
      * best-effort enumerate the asset catalog at runtime.

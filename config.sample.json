@@ -67,9 +67,35 @@
         "targetCooldownMs": 5000,
         "protectedMembers": [],
         "startPose": [],
+        "_activities": "Optional modes layered on top of the base roleplay bot. A key present and not false enables that activity. Known ids: 'riddles'. Each activity contributes its own LLM tools, prompt sections, /bot commands and a line in the bot bio.",
+        "activities": {
+            "_riddles": "Riddle side-game. The LLM hands out riddles and judges guesses; progress is tracked per player and persisted.",
+            "riddles": {
+                "enabled": true,
+                "_goal": "Riddles a player must solve to finish.",
+                "goal": 10,
+                "_csvPath": "Riddle table with QUESTIONS,ANSWERS columns.",
+                "csvPath": "bin/games/riddles/riddles.csv",
+                "_stateFile": "Where per-player progress is persisted (JSON, written atomically).",
+                "stateFile": "riddles.state.json",
+                "_answersInContext": "Show each player's current riddle answer in the room snapshot so the LLM can judge guesses. Set false if the model leaks answers.",
+                "answersInContext": true,
+                "_defaultBatchSize": "How many riddles getRiddles returns when count is omitted.",
+                "defaultBatchSize": 5,
+                "_greetOnEnter": "Whisper every entering character once with the bot intro and a riddle invite. Returning players get their progress instead.",
+                "greetOnEnter": true,
+                "_bioLine": "Line appended to the bot bio advertising the mode. {cmd} is replaced with the command name.",
+                "bioLine": "Riddles: write {cmd} to play riddles with me."
+            }
+        },
+        "_riddlesShorthand": "Optional shorthand for the riddle activity. Ignored when llm.activities.riddles is present.",
+        "riddles": {
+            "enabled": false,
+            "goal": 10
+        },
         "_llmLog": "Optional file path (e.g. \"llm.log\"). When set, every full LLM request (complete prompt) and response (content, tool calls, token usage) is appended to that file as JSONL. llama-server's own log is either an overview or per-token, so this captures the in-between.",
         "llmLog": "",
-        "_debugPort": "Optional local port (e.g. 9377). When set, a debug HTTP server binds to 127.0.0.1:<port> with endpoints: GET /status, GET /tools, POST /tool {name, args}, GET /toollog?limit=N, GET /llmlog?limit=N, POST /stop. For driving/inspecting the bot programmatically while it runs live.",
+        "_debugPort": "Optional local port (e.g. 9377). When set, a debug HTTP server binds to 127.0.0.1:<port> with endpoints: GET /status, GET /tools, POST /tool {name, args}, GET /toollog?limit=N, GET /history?limit=N, GET /llmlog?limit=N, GET /activities, POST /activities/reset {id}, POST /stop. For driving/inspecting the bot programmatically while it runs live.",
         "debugPort": 0
     }
 }

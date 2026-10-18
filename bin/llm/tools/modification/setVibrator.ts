@@ -175,7 +175,7 @@ export const setVibratorTool: Tool = {
     name: "setVibrator",
     definition: def(
         "setVibrator",
-        "Control a vibrator item already worn by a character: set its intensity level and/or mode. The character must already have the item in the given group. Intensity: -1 off, 0 low, 1 medium, 2 high, 3 maximum. Mode: Off, Low, Medium, High, Maximum, Random, Escalate, Tease, Deny, Edge. Random mode randomizes intensity over time.",
+        "Control a vibrator item already worn by a character: set its intensity level and/or mode. The character must already have the item in the given group. ",
         {
             memberNumber: {
                 type: "number",
@@ -202,7 +202,7 @@ export const setVibratorTool: Tool = {
                     "Edge",
                 ],
                 description:
-                    "Vibrator mode, e.g. 'Random', 'Escalate', 'Tease', 'Deny', 'Edge'",
+                    "Vibrator mode, e.g. 'Random', 'Escalate', 'Tease', 'Deny', 'Edge'. Random mode randomizes intensity over time.",
             },
         },
         ["memberNumber", "group"],
@@ -227,8 +227,8 @@ export const setVibratorTool: Tool = {
             return `Character has no item in group '${group}'. Add one first with addItem.`;
 
         // Verify it's actually a vibrator
-        if (!isVibrator(item))
-            return `Item '${group}:${item.Name}' does not appear to be a controllable vibrator.`;
+        //if (!isVibrator(item))
+            //return `Item '${group}:${item.Name}' does not appear to be a controllable vibrator.`;
 
         if (intensity === undefined && mode === undefined)
             return "Nothing to do: provide 'intensity' and/or 'mode'.";

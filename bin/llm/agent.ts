@@ -23,6 +23,8 @@ import { buildTools, resolveTools, Tool, ToolContext, displayName } from "./tool
 import { ContextBuilder, messageContent, type HistoryEntry } from "./context";
 import { LLMLogger } from "./llmLogger";
 import { LLMConfig } from "../config";
+import type { ActivityContext, LLMActivity } from "./activities/types";
+import { CommandHub } from "./commands/hub";
 
 /**
  * Read-only catalog lookup tools. Calling endTurn in the same batch as one of
@@ -87,6 +89,12 @@ export class LLMAgent {
     private logger: LLMLogger | undefined;
     /** Last 50 tool invocations (LLM or manual), oldest first. */
     private toolLog: ToolLogEntry[] = [];
+    /** Optional activities layered on top of the base roleplay bot. */
+    private activities: LLMActivity[] = [];
+    /** Command hub, set by LLMGame so activities can register commands. */
+    private commandHub: CommandHub | undefined;
+    /** Built once after activities are attached; passed to activity hooks. */
+    private activityContext: ActivityContext | undefined;
 
     private pendingEvents: string[] = [];
     private debounceTimer: NodeJS.Timeout | undefined;
@@ -143,6 +151,121 @@ export class LLMAgent {
             this.logger = new LLMLogger(config.llmLog);
             console.log(`LLM logging enabled -> ${config.llmLog}`);
         }
+    }
+
+    /**
+     * Give the agent the command hub so activities can register commands
+     * during their `init()`. Must be called before {@link attachActivities}.
+     */
+    setCommandHub(hub: CommandHub): void {
+        this.commandHub = hub;
+    }
+
+    /**
+     * Build the shared {@link ActivityContext}. Must be called (after
+     * {@link setCommandHub}) BEFORE any activity's `init()`, because `init()`
+     * needs the context to register commands and emit whispers.
+     *
+     * Idempotent: subsequent calls return the same object.
+     */
+    createActivityContext(): ActivityContext {
+        if (this.activityContext) return this.activityContext;
+        if (!this.commandHub) {
+            throw new Error(
+                "LLMAgent.createActivityContext: command hub is not set.",
+            );
+        }
+        this.activityContext = {
+            conn: this.conn,
+            llmConfig: this.config,
+            toolContext: this.ctx,
+            commands: this.commandHub,
+            requestParticipant: (memberNumber: number) =>
+                this.setParticipant(memberNumber, true),
+            isParticipant: (memberNumber: number) =>
+                this.ctx.participants.has(memberNumber),
+            isSuperuser: (memberNumber: number) =>
+                this.superusers.includes(memberNumber),
+            participants: () => [...this.ctx.participants],
+            whisper: (memberNumber: number, text: string) =>
+                this.conn.SendMessage("Whisper", text, memberNumber),
+            note: (content: string) =>
+                this.contextBuilder.recordSystem(content),
+            pushEvent: (content: string) => this.onEvent(content),
+            log: (message: string) =>
+                console.log(`[activity] ${message}`),
+            warn: (message: string) =>
+                console.warn(`[activity] ${message}`),
+        };
+        return this.activityContext;
+    }
+
+    /**
+     * Attach the enabled activities and merge what they contribute.
+     *
+     * Called AFTER each activity's `init()` has completed, because the tool
+     * set and prompt material depend on the activity state being loaded.
+     * Order:
+     *
+     *  1. ensure the shared activity context exists,
+     *  2. merge activity tools into the live tool set (respecting the same
+     *     allowedTools/deniedTools filtering as the base tools),
+     *  3. hand the activities to the context builder for prompt material,
+     *  4. let each activity register its commands.
+     */
+    attachActivities(activities: LLMActivity[]): void {
+        this.activities = activities;
+        if (activities.length === 0) return;
+
+        this.createActivityContext();
+
+        // Merge activity tools, applying the same allow/deny filtering the
+        // base tools went through.
+        const denied = new Set(this.config.deniedTools ?? []);
+        const allowed = this.config.allowedTools ?? [];
+        for (const activity of activities) {
+            for (const tool of activity.getTools()) {
+                if (denied.has(tool.name)) continue;
+                if (allowed.length > 0 && !allowed.includes(tool.name)) continue;
+                if (this.toolMap.has(tool.name)) {
+                    console.warn(
+                        `[activities] Tool '${tool.name}' from '${activity.id}' collides with an existing tool; skipping.`,
+                    );
+                    continue;
+                }
+                this.tools.push(tool);
+                this.toolMap.set(tool.name, tool);
+            }
+        }
+
+        this.contextBuilder.setActivities(activities, () => this.activityContext);
+
+        for (const activity of activities) {
+            try {
+                activity.registerCommands?.(this.activityContext);
+            } catch (e) {
+                console.error(
+                    `[activities] ${activity.id} failed to register commands:`,
+                    e,
+                );
+            }
+        }
+
+        console.log(
+            `Activities enabled: ${activities
+                .map((a) => `${a.id} (${a.getTools().length} tools)`)
+                .join(", ")}`,
+        );
+    }
+
+    /** Enabled activities, for event forwarding and debug inspection. */
+    getActivities(): LLMActivity[] {
+        return this.activities;
+    }
+
+    /** The shared context handed to activity hooks, once attached. */
+    getActivityContext(): ActivityContext | undefined {
+        return this.activityContext;
     }
 
     /**
@@ -659,6 +782,7 @@ export class LLMAgent {
      * participant also releases their leash if held.
      */
     setParticipant(memberNumber: number, participating: boolean): void {
+        const changed = this.ctx.participants.has(memberNumber) !== participating;
         if (participating) {
             this.ctx.participants.add(memberNumber);
         } else {
@@ -666,6 +790,39 @@ export class LLMAgent {
             this.typingMembers.delete(memberNumber);
             this.releaseLeash(memberNumber);
         }
+        if (changed) {
+            for (const activity of this.activities) {
+                try {
+                    activity.onParticipantChanged?.(
+                        this.activityContext!,
+                        memberNumber,
+                    );
+                } catch (e) {
+                    console.error(
+                        `[activities] ${activity.id} participant hook failed:`,
+                        e,
+                    );
+                }
+            }
+        }
+    }
+
+    /**
+     * Record a message the bot sent into the rolling history, for activities
+     * that emit their own messages. Exposed so activities never reach into
+     * the context builder directly.
+     */
+    recordOutgoing(type: string, content: string): void {
+        this.contextBuilder.recordOutgoing(type, content);
+    }
+
+    /**
+     * Record a SYSTEM note into the rolling history. Unlike
+     * {@link ActivityContext.note}, which is bound to the shared context, this
+     * is available before activities are attached.
+     */
+    recordSystemNote(content: string): void {
+        this.contextBuilder.recordSystem(content);
     }
 
     /**
@@ -806,5 +963,21 @@ export class LLMAgent {
         this.typingMembers.clear();
         this.setEmoticon(null);
         this.logger?.close();
+    }
+
+    /**
+     * Stop the agent and every activity (flushing persisted state). Separate
+     * from {@link stop} so the synchronous shutdown path keeps working while
+     * activities get a chance to finish their async cleanup.
+     */
+    async stopWithActivities(): Promise<void> {
+        this.stop();
+        for (const activity of this.activities) {
+            try {
+                await activity.stop();
+            } catch (e) {
+                console.error(`[activities] ${activity.id} stop failed:`, e);
+            }
+        }
     }
 }

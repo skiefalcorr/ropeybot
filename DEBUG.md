@@ -8,12 +8,12 @@ when you need to test tools or diagnose live behavior.
 ## Prerequisites
 
 1. The user's `config.json` must have:
-   - `"game": "llm"`
-   - `"llm.debugPort": <port>` (e.g. `9377`) — enables the debug HTTP server
-   - `"llm.llmLog": "llm.log"` (recommended) — enables the JSONL LLM log that
-     `/llmlog` reads
-   - `"superusers": [...]` — not needed for the debug server, but needed for
-     the in-game `!tool` commands
+    - `"game": "llm"`
+    - `"llm.debugPort": <port>` (e.g. `9377`) — enables the debug HTTP server
+    - `"llm.llmLog": "llm.log"` (recommended) — enables the JSONL LLM log that
+      `/llmlog` reads
+    - `"superusers": [...]` — not needed for the debug server, but needed for
+      the in-game `!tool` commands
 2. The bot process is running: `npx tsx bin/main.ts config.json`
    (start it in the background and redirect output to a log file, e.g.
    `bot.log`, so console output — including `LLM tool call: ...` lines — is
@@ -94,6 +94,28 @@ Returns 404 if `llmLog` is not configured.
 curl -s "http://127.0.0.1:9377/llmlog?limit=5"
 ```
 
+### `GET /activities`
+
+Every enabled activity with its tool count and debug snapshot. For riddle
+mode this includes the goal, pool size, every tracked player (state, current
+riddle, attempts, solves) and the leaderboard.
+
+```
+curl -s http://127.0.0.1:9377/activities
+```
+
+### `POST /activities/reset`
+
+Reset one activity's runtime state. Body: `{ "id": "<activityId>" }`.
+Returns 404 with the list of available ids if the id is unknown.
+
+```
+curl -s -X POST http://127.0.0.1:9377/activities/reset -d '{"id":"riddles"}'
+```
+
+This is the fast way to clear riddle progress between live tests without
+editing `riddles.state.json` by hand.
+
 ### `POST /stop`
 
 Shuts the bot down cleanly (runs the same cleanup as SIGINT: closes the debug
@@ -115,6 +137,80 @@ curl -s -X POST http://127.0.0.1:9377/stop
 6. Fix code, then: POST /stop (or kill the process), recompile if src/ changed
    (cd src && npm run compile), restart from step 1
 ```
+
+## Activity layer (riddle mode)
+
+Modes such as riddles are implemented as **activities** layered on top of the
+base roleplay bot — `config.game` stays `"llm"`. An activity contributes LLM
+tools, prompt sections, `/bot` commands, event hooks and a bio line; the base
+bot owns the connection and the turn loop.
+
+Enable it in `config.json`:
+
+```json
+"llm": {
+    "activities": {
+        "riddles": { "enabled": true, "goal": 10 }
+    }
+}
+```
+
+### What the riddle activity adds
+
+| Piece              | Effect                                                                                                                                                 |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `getRiddles`       | N random riddles (`id`, question, answer), optionally excluding riddles a player already solved.                                                       |
+| `getSingleRiddle`  | One random riddle; with a player given, it is assigned immediately. The fallback when the LLM loses the thread in full RP.                             |
+| `assignRiddle`     | Records what the LLM actually asked (`riddleId`, or raw `question` + `answer`).                                                                        |
+| `markRiddleResult` | **The LLM's verdict.** `correct: true/false`, optional `giveUp`, `guessedAnswer`, `reason`. The only thing that changes progress.                      |
+| `getRiddleStatus`  | One player (with their current riddle and answer) or the leaderboard.                                                                                  |
+| `clearRiddle`      | Returns a player to idle so they can get the next riddle.                                                                                              |
+| `/bot riddles`     | Private whisper with the sender's progress. Also opts them into roleplay (same as `/bot start`). `/bot riddles top`, `/bot riddles reset` (superuser). |
+
+There is no deterministic answer matching: the model judges guesses itself.
+The canonical answer is included in the room snapshot per player
+(`answersInContext`, default true); set it to `false` if the model leaks
+answers into character.
+
+### Where progress lives
+
+`llm.activities.riddles.stateFile` (default `riddles.state.json`). Writes are
+debounced and atomic (temp file + rename), and flushed on shutdown. Deleting
+the file resets everyone.
+
+### Prompt layout
+
+- Riddle rules go into the **static** system prompt (`systemSections`), so the
+  KV cache stays useful across turns.
+- Per-player progress appears under each character in the fresh room-state
+  snapshot (`characterAnnotations`): `RIDDLE PLAYER (priority for roleplay)`,
+  solve count, current riddle and answer.
+- The leaderboard and any in-flight riddles go at the end of the snapshot
+  (`roomStateSections`).
+
+### Command hub
+
+`/bot` commands are resolved by `CommandHub`, not by `CommandParser` directly.
+Contributions are either `replace` (compete for the base slot, highest
+priority wins) or `append` (output stacked after the base). Handlers return
+text; the hub sends one assembled reply. This is what lets an activity add
+to `/bot status` or override it, and what keeps `/bot riddles` private via
+`private: true`.
+
+`/bot status` lists participants plus the enabled activity names only — all
+riddle detail is behind `/bot riddles`.
+
+## Offline riddle tests
+
+No BC connection or LLM needed:
+
+```
+npx tsx bin/games/riddles/riddleTest.ts
+```
+
+Covers the CSV parser (quotes, commas in quotes, CRLF, BOM, embedded
+newlines), stable ids, de-duplication, random picking and every state-machine
+transition.
 
 ## Gotchas
 

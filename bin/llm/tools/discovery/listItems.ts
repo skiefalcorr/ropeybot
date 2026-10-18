@@ -25,7 +25,7 @@ export const listItemsTool: Tool = {
                 type: "string",
                 enum: ITEM_GROUPS,
                 description:
-                    "Filter by asset group, e.g. 'ItemMouth', 'ItemNeck', 'ItemArms'",
+                    "Filter by asset group, e.g. 'ItemMouth', 'ItemNeck', 'ItemArms'. For males 'ItemVulva' is for penis and 'ItemVulvaPiercings' is for glans.",
             },
             gender: {
                 type: "string",
