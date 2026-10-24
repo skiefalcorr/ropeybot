@@ -24,13 +24,14 @@ import {
     checkRateLimit,
 } from "../shared";
 import { validateAsset } from "../catalog";
+import { applyTypedOption } from "../extended/shared";
 
 export const addItemTool: Tool = {
     name: "addItem",
     history: "action",
     definition: def(
         "addItem",
-        "Add an item (restraint, clothing, etc.) to a character. Use listItems (restraints/BDSM) or listClothing (clothing/body) to find valid group/asset names. The item is automatically colored; pass color1/color2 to override. Optionally set a craft name/description so the item shows up as a named craft. Avoid using hoods - they are mostly ugly.",
+        "Add an item (restraint, clothing, etc.) to a character. Use listItems (restraints/BDSM) or listClothing (clothing/body) to find valid group/asset names. The item is automatically colored; pass color1/color2 to override. Optionally set a craft name/description so the item shows up as a named craft. For items tagged [ext:typed], pass extendedType to pick a specific variant right away instead of the default. Avoid using hoods - they are mostly ugly.",
         {
             memberNumber: {
                 type: "number",
@@ -63,6 +64,11 @@ export const addItemTool: Tool = {
                 type: "string",
                 description: "Optional craft description for the item.",
             },
+            extendedType: {
+                type: "string",
+                description:
+                    "For extended items with variants ([ext:typed]): the variant to select, e.g. 'Star' for ItemTorso:HempRopeHarness. Omit for the default variant.",
+            },
         },
         ["memberNumber", "group", "asset"],
     ),
@@ -74,6 +80,7 @@ export const addItemTool: Tool = {
         const color2 = args.color2 as string | undefined;
         const craftName = args.craftName as string | undefined;
         const craftDescription = args.craftDescription as string | undefined;
+        const extendedType = args.extendedType as string | undefined;
         const target = findCharacter(ctx.conn, args);
         if (!target) return "Error: character not found in room.";
         if (isProtected(ctx, memberNumber))
@@ -101,6 +108,7 @@ export const addItemTool: Tool = {
             // Color the item after the character's hair/eyes (or the
             // explicit overrides), then optionally mark it as a craft.
             const applied = target.Appearance.InventoryGet(group as never);
+            let variantNote = "";
             if (applied) {
                 applied.setColorFromCharacter(color1, color2);
                 if (craftName !== undefined || craftDescription !== undefined) {
@@ -108,6 +116,17 @@ export const addItemTool: Tool = {
                         Name: craftName ?? "",
                         Description: craftDescription ?? "",
                     });
+                }
+
+                // Select a specific variant of an extended item, so the model
+                // does not need a second round trip after adding it.
+                if (extendedType !== undefined) {
+                    // applyTypedOption's failures already name the valid
+                    // options when there are any to name.
+                    const result = applyTypedOption(applied, extendedType);
+                    variantNote = result.ok
+                        ? ` Variant: ${result.after}.`
+                        : ` Warning: ${result.error}`;
                 }
             }
 
@@ -132,7 +151,7 @@ export const addItemTool: Tool = {
                 { Tag: "FocusAssetGroup", FocusGroupName: group },
             ]);
 
-            return `Added ${group}:${asset} to ${displayName(target)}.`;
+            return `Added ${group}:${asset} to ${displayName(target)}.${variantNote}`;
         } catch (e) {
             return `Error adding item: ${String(e)}`;
         }

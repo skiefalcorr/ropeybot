@@ -18,7 +18,7 @@ export const endTurnTool: Tool = {
     name: "endTurn",
     definition: def(
         "endTurn",
-        "Signal that you are done with all actions for this turn. Call this when you have finished everything you wanted to do. Do not call it in the same batch as lookup tools (listItems, listClothing, listPoses) — perform your action first, then call endTurn.",
+        "Signal that you are done with all actions for this turn. Call this when you have finished everything you wanted to do. Do not call it in the same batch as lookup tools (listItems, listClothing, listPoses) — perform your action first, then call endTurn. If nothing else is happening in the room, this will skip 5 minutes.",
         {},
     ),
     handler: () => {

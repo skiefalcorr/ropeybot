@@ -41,7 +41,7 @@ import {
 import {
     ContextBuilder,
     describeCharacter,
-    describeRestraintSlots,
+    describeRestraints,
     restraintSlots,
 } from "../../llm/context";
 import { ITEM_GROUPS } from "../../llm/tools/catalog";
@@ -770,34 +770,35 @@ function testRestraintSlots(): void {
         slots.slice(0, ITEM_GROUPS.length).join(",") === ITEM_GROUPS.join(","),
     );
 
-    const block = describeRestraintSlots(char as never);
-    const text = block.join("\n");
+    // Compact list, same shape as `wearing:`, with every slot present.
+    const list = describeRestraints(char as never);
+    const entries = list.split(", ");
+    equal("one entry per slot", entries.length, slots.length);
+    check("an empty slot renders as group:—", entries.includes("ItemMouth2:—"));
     check(
-        "the block states that every slot is listed",
-        text.includes("every slot is listed"),
+        "the worn mouth slot shows group:item",
+        entries.includes("ItemMouth:BallGag"),
     );
-    check(
-        "an empty slot renders as an em dash",
-        block.some((l) => l.endsWith("—")),
-    );
-
-    const mouthRows = block.filter((l) => l.includes("ItemMouth"));
     equal(
         "the three mouth slots are all reported separately",
-        mouthRows.length,
+        entries.filter((e) => e.startsWith("ItemMouth")).length,
         3,
     );
     check(
-        "the worn mouth slot shows its item",
-        block.some((l) => /ItemMouth\s+BallGag/.test(l)),
-    );
-    check(
-        "the other two mouth slots are empty",
-        block.filter((l) => /ItemMouth[23]\s+—/.test(l)).length === 2,
+        "a worn non-Item group is included",
+        entries.includes("Mask:HalfMask"),
     );
 
     // `restrained`/`gagged` flags were dropped: the slots carry that truth.
     const description = describeCharacter(char as never, 200);
+    check(
+        "the description is a single line again",
+        !description.includes("\n"),
+    );
+    check(
+        "the description uses the items: prefix like before",
+        description.includes("items: ItemFeet:—"),
+    );
     check(
         "the description no longer asserts a restrained flag",
         !description.includes("restrained"),
@@ -807,12 +808,8 @@ function testRestraintSlots(): void {
         !description.includes("gagged"),
     );
     check(
-        "the description keeps the summary on its first line",
-        description.split("\n")[0].includes("Slots (member #42)"),
-    );
-    check(
-        "the slot block follows the summary",
-        description.split("\n")[1]?.includes("restraints") ?? false,
+        "the summary still starts with the character",
+        description.startsWith("Slots (member #42)"),
     );
 }
 

@@ -14,13 +14,14 @@
 
 import { Tool, def } from "../shared";
 import { CATALOG, ITEM_GROUPS, FETISH_NAMES } from "../catalog";
+import { getExtendedEntry } from "../extended/shared";
 
 export const listItemsTool: Tool = {
     name: "listItems",
     lookup: true,
     definition: def(
         "listItems",
-        "List available items (restraints and BDSM gear: gags, cuffs, vibrators, shock devices, etc.) as 'group:asset' names so you can use valid names with addItem/removeItem. Optionally filter by group, gender, fetish tag, or a search term.",
+        "List available items (restraints and BDSM gear: gags, cuffs, vibrators, shock devices, etc.) as 'group:asset' names so you can use valid names with addItem/removeItem. Items tagged [ext:typed] have configurable variants you can change with setExtendedType (see listExtendedOptions once worn); [ext:modular] items have variants the bot cannot change yet. Optionally filter by group, gender, fetish tag, search term, or extended type.",
         {
             group: {
                 type: "string",
@@ -45,6 +46,11 @@ export const listItemsTool: Tool = {
                 description:
                     "Case-insensitive substring to match against group or asset names",
             },
+            extendedOnly: {
+                type: "boolean",
+                description:
+                    "Only list items that have configurable extended variants",
+            },
             limit: {
                 type: "number",
                 description: "Max results to return (default 100)",
@@ -56,6 +62,7 @@ export const listItemsTool: Tool = {
         const gender = args.gender as "F" | "M" | undefined;
         const fetish = args.fetish as string | undefined;
         const search = (args.search as string | undefined)?.toLowerCase();
+        const extendedOnly = args.extendedOnly === true;
         const limit = Math.min(Number(args.limit ?? 100), 200);
         const out: string[] = [];
         for (const grp of CATALOG) {
@@ -79,11 +86,21 @@ export const listItemsTool: Tool = {
                     !name.toLowerCase().includes(search)
                 )
                     continue;
-                out.push(
-                    tags?.length
-                        ? `${grp.Group}:${name} [${tags.join(", ")}]`
-                        : `${grp.Group}:${name}`,
-                );
+
+                // Only advertise items the model can actually configure; a
+                // single-option extended item has nothing to choose.
+                const entry = getExtendedEntry(grp.Group, name);
+                if (extendedOnly && !entry?.configurable) continue;
+
+                const parts = [`${grp.Group}:${name}`];
+                if (tags?.length) parts.push(`[${tags.join(", ")}]`);
+                if (entry?.configurable)
+                    parts.push(
+                        entry.archetype === "typed"
+                            ? "[ext:typed]"
+                            : `[ext:${entry.archetype}]`,
+                    );
+                out.push(parts.join(" "));
                 if (out.length >= limit) break;
             }
             if (out.length >= limit) break;

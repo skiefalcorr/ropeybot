@@ -21,6 +21,7 @@ import {
 import lzString from "lz-string";
 import { CLOTHING_GROUPS } from "./tools";
 import { ITEM_GROUPS } from "./tools/catalog";
+import { extendedAnnotation } from "./tools/extended/shared";
 import { vibratorState } from "./tools/modification/setVibrator";
 import { displayName } from "./tools/shared";
 import { LLMConfig } from "../config";
@@ -325,6 +326,7 @@ export class ContextBuilder {
             "- You can use the available tools to interact with characters.",
             "- Server closes empty chatrooms, like when you were the only one present and left. In order to go back to it, you'll need to create it again.",
             "- Use listItems (for gear and restraints) / listClothing (for clothing) to discover valid names before using them. Results are looped back into your context for this turn only.",
+            "- Some items are 'extended': they come in variants. In the room state they are shown as group:Item[Variant], and listItems/listClothing tag them [ext:typed]. Use listExtendedOptions to see the variants of a worn item, then setExtendedType to change it (or pass extendedType to addItem).",
             "- If a character uses a safeword, or sends OOC message - in parentheses: (like this) - respect their request.",
             //"- Be mindful of consent and comfort. Keep interactions tasteful.",
             "- A fresh 'Current room state' snapshot is provided at the end of the conversation. Trust it over anything you remember.",
@@ -479,41 +481,28 @@ export function restraintSlots(char: API_Character): string[] {
 }
 
 /**
- * Render the restraint slots as an aligned block, one row per slot.
+ * Render the restraint slots as a single `group:item, group:item, ...` list,
+ * mirroring how clothing is rendered in the summary.
  *
- * Every slot is always present, with {@link EMPTY_SLOT} when nothing is worn,
- * so the model can tell "empty" from "not reported" without having to
- * remember which groups exist. Aligned columns and own lines are used rather
- * than a markdown table because the character summary itself is a
- * `|`-separated line — pipes inside it would nest unreadably.
+ * Unlike clothing, every slot is always present: an empty slot appears as
+ * `ItemMouth:—`, so the model can tell "empty" from "not reported" without
+ * having to remember which groups exist.
  */
-export function describeRestraintSlots(char: API_Character): string[] {
-    const slots = restraintSlots(char);
-    if (slots.length === 0) return [];
-
-    const rows = slots.map((group) => {
-        const item = char.Appearance.InventoryGet(group as never);
-        if (!item) return { group, value: EMPTY_SLOT };
-        const vibe = vibratorState(item);
-        return {
-            group,
-            value: vibe ? `${item.Name} [vibe:${vibe}]` : item.Name,
-        };
-    });
-
-    const width = Math.max(...rows.map((r) => r.group.length));
-    return [
-        "restraints (every slot is listed; — means empty):",
-        ...rows.map((r) => `  ${r.group.padEnd(width)}  ${r.value}`),
-    ];
+export function describeRestraints(char: API_Character): string {
+    return restraintSlots(char)
+        .map((group) => {
+            const item = char.Appearance.InventoryGet(group as never);
+            if (!item) return `${group}:${EMPTY_SLOT}`;
+            const vibe = vibratorState(item);
+            const base = `${group}:${item.Name}${extendedAnnotation(item)}`;
+            return vibe ? `${base} [vibe:${vibe}]` : base;
+        })
+        .join(", ");
 }
 
 /**
- * Produce a description of a character's current state.
- *
- * The first line is the compact `|`-separated summary; restraint slots follow
- * as their own aligned block (see {@link describeRestraintSlots}). Callers
- * that need a single line can use everything before the first newline.
+ * Produce a description of a character's current state as one
+ * `|`-separated line.
  */
 export function describeCharacter(
     char: API_Character,
@@ -542,13 +531,18 @@ export function describeCharacter(
         char.Appearance.InventoryGet(g as never),
     ).map((g) => {
         const item = char.Appearance.InventoryGet(g as never);
-        return item ? `${g}:${item.Name}` : g;
+        return item ? `${g}:${item.Name}${extendedAnnotation(item)}` : g;
     });
     if (wearing.length > 0) parts.push(`wearing: ${wearing.join(", ")}`);
 
+    // Same compact shape as `wearing:`, but with every restraint slot present
+    // so an empty slot reads as empty rather than as missing information.
+    const restraints = describeRestraints(char);
+    if (restraints) parts.push(`items: ${restraints}`);
+
     // `restrained` and `gagged` are intentionally NOT included: both are
-    // derivable from the slot block below, and a summary flag disagreeing
-    // with the table would be worse than either alone.
+    // derivable from the slot list above, and a summary flag disagreeing
+    // with it would be worse than either alone.
     if (isNaked(char)) parts.push("naked");
 
     const pos = char.MapPos;
@@ -556,7 +550,5 @@ export function describeCharacter(
         parts.push(`at (${pos.X}, ${pos.Y})`);
     }
 
-    const summary = parts.join(" | ");
-    const slots = describeRestraintSlots(char);
-    return slots.length > 0 ? [summary, ...slots].join("\n") : summary;
+    return parts.join(" | ");
 }

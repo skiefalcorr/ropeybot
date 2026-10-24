@@ -180,41 +180,32 @@ the file resets everyone.
 
 ### Restraint slots in the character summary
 
-Each character's description is a one-line `|`-separated summary followed by
-an exhaustive, aligned slot block:
+Restraints are rendered as a compact `group:item` list on the summary line,
+mirroring how clothing is shown — but with **every slot present**:
 
 ```
-Loona (member #144334) | female | bio: … | pose: Standing
-restraints (every slot is listed; — means empty):
-  ItemFeet              —
-  ItemLegs              PawPaddedPetsuitLegs
-  ItemMouth             BallGag
-  ItemMouth2            —
-  ItemMouth3            —
-  ItemHead              LeatherBlindfold
-  …
+Loona (member #144334) | female | bio: … | pose: Standing | items: ItemFeet:—, ItemLegs:PawPaddedPetsuitLegs, ItemArms:PawPaddedPetsuitArms, ItemNeck:SpikeCollar, ItemMouth:BallGag, ItemMouth2:—, ItemMouth3:—, ItemHead:LeatherBlindfold, … | naked
 ```
 
-Why it looks like this:
+Why:
 
-- **Every slot is always listed**, with `—` for empty. A missing row would
-  leave the model unable to distinguish "empty" from "not reported".
+- **Every slot is always listed**, with `—` for empty. Omitting an empty slot
+  would leave the model unable to tell "empty" from "not reported", which is
+  the whole reason for the change.
 - The slot list is the **union** of `ITEM_GROUPS` and any item group actually
   present on the character, so a group the catalog does not classify as
   `Category: "Item"` (e.g. `Mask`) can never be silently dropped.
 - Order is `ITEM_GROUPS` order with extras appended alphabetically, so the
-  block is stable across turns.
-- Aligned columns on their own lines rather than a markdown table: the summary
-  line is `|`-separated, and pipes inside it would nest unreadably.
+  line is stable across turns.
 - `ItemMouth`, `ItemMouth2` and `ItemMouth3` are three independent slots and
-  are reported separately — `bin/hub/logic/kidnappersGameRoom.ts` already
-  relies on that distinction.
-- Vibrator state is folded into the cell (`Vibrator [vibe:high]`).
+  are reported separately — `bin/hub/logic/kidnappersGameRoom.ts` relies on
+  that distinction.
+- Vibrator state is folded into the value (`Vibrator [vibe:high]`).
 - `restrained` and `gagged` are **not** in the summary: both are derivable
-  from the slots, and a summary flag disagreeing with the table would be
-  worse than either alone. `naked` stays because it also weighs clothing.
+  from the slot list, and a flag disagreeing with the list would be worse
+  than either alone. `naked` stays because it also weighs clothing.
 
-Cost is roughly one line per item group (28 today) per character per turn.
+Cost is one entry per item group (28 today) per character per turn.
 
 ### Prompt layout
 
