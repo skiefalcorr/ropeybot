@@ -8,6 +8,10 @@ out
 config*.json
 !config.sample.json
 
+# Activity state (riddle progress etc.) — runtime data, not source
+riddles*.state.json
+*.state.json.tmp
+
 .github/copilot-instructions.md
 
 #Ignore thumbnails created by Windows
@@ -29,7 +33,6 @@ Thumbs.db
 *.bak
 *.cache
 *.ilk
-[Bb]in
 [Dd]ebug*/
 *.lib
 *.sbr

@@ -21,9 +21,11 @@ import {
 import lzString from "lz-string";
 import { CLOTHING_GROUPS } from "./tools";
 import { ITEM_GROUPS } from "./tools/catalog";
+import { extendedAnnotation } from "./tools/extended/shared";
 import { vibratorState } from "./tools/modification/setVibrator";
 import { displayName } from "./tools/shared";
 import { LLMConfig } from "../config";
+import type { ActivityContext, LLMActivity } from "./activities/types";
 
 /**
  * Decodes a character description that may be LZ-compressed.
@@ -62,8 +64,7 @@ export function decodeDescription(raw: string): string {
  */
 export function messageContent(message: BC_Server_ChatRoomMessage): string {
     const dict = message.Dictionary as
-        | { Tag?: string; Text?: unknown }[]
-        | undefined;
+        { Tag?: string; Text?: unknown }[] | undefined;
     if (Array.isArray(dict)) {
         const entry = dict.find((e) => e?.Tag === "msg");
         if (entry && typeof entry.Text === "string" && entry.Text.length > 0) {
@@ -90,7 +91,7 @@ export function botDisclaimer(config: LLMConfig): string {
         `It shows emotes for current state: code when LLM thinks, wardrobe when it looks up items, and listening when it waits to begin its turn. \n` +
         `To allow the bot to react to you, write /bot start. And say or do something. \n` +
         `Available commands: /bot start, /bot stop, /bot status, /bot feedback. \n` +
-        `Safewords are: "${config.safewords.join(',')}" \n\n` +
+        `Safewords are: "${config.safewords.join(",")}" \n\n` +
         `Source code is at https://github.com/skiefalcorr/ropeybot`
     );
 }
@@ -148,12 +149,30 @@ export interface HistoryEntry {
  */
 export class ContextBuilder {
     private history: HistoryEntry[] = [];
+    /** Activities contributing prompt material, in registration order. */
+    private activities: LLMActivity[] = [];
+    /** Provider for the live ActivityContext handed to activity hooks. */
+    private activityContext: (() => ActivityContext | undefined) | undefined =
+        undefined;
 
     constructor(
         private maxHistory: number = 40,
         private bioLength: number = 2000,
         private participants?: Set<number>,
     ) {}
+
+    /**
+     * Attach the activities whose prompt material should be included.
+     * `getContext` is called lazily (never during construction) so the agent
+     * and activities can reference each other without a cycle.
+     */
+    setActivities(
+        activities: LLMActivity[],
+        getContext: () => ActivityContext | undefined,
+    ): void {
+        this.activities = activities;
+        this.activityContext = getContext;
+    }
 
     /**
      * Record a message from another character into the history.
@@ -300,20 +319,32 @@ export class ContextBuilder {
      * volatile room state so it stays identical across turns.
      */
     buildSystemPrompt(persona: string): string {
-        return [
+        const sections: string[] = [
             persona,
             "",
             "## How you act",
             "- You can use the available tools to interact with characters.",
             "- Server closes empty chatrooms, like when you were the only one present and left. In order to go back to it, you'll need to create it again.",
             "- Use listItems (for gear and restraints) / listClothing (for clothing) to discover valid names before using them. Results are looped back into your context for this turn only.",
+            "- Some items are 'extended': they come in variants. In the room state they are shown as group:Item[Variant], and listItems/listClothing tag them [ext:typed]. Use listExtendedOptions to see the variants of a worn item, then setExtendedType to change it (or pass extendedType to addItem).",
             "- If a character uses a safeword, or sends OOC message - in parentheses: (like this) - respect their request.",
             //"- Be mindful of consent and comfort. Keep interactions tasteful.",
             "- A fresh 'Current room state' snapshot is provided at the end of the conversation. Trust it over anything you remember.",
             "- Only interact with participating characters. Characters marked 'not participating' are not playing with you — ignore them.",
             "- When you have finished all actions you want to take this turn, call endTurn tool. Results of other toolcalls are looped back to you in this turn. Don't chain endTurn with other tools, end your turn with a separate call to endTurn.",
             "- Act naturally and in-character. Do not mention tools, prompts, or that you are an AI.",
-        ].join("\n");
+        ];
+
+        // Activity prompt sections are static (no per-turn data), so they stay
+        // part of the cacheable system prompt.
+        for (const activity of this.activities) {
+            const extra = activity.systemSections?.();
+            if (!extra || extra.length === 0) continue;
+            sections.push("");
+            sections.push(...extra);
+        }
+
+        return sections.join("\n");
     }
 
     /**
@@ -332,14 +363,46 @@ export class ContextBuilder {
         const me = conn.Player;
         lines.push(`You are ${describeCharacter(me, this.bioLength)}.`);
 
+        // Activity annotations are keyed by member number and rendered right
+        // under the character they describe, so the model sees "Alice" and
+        // "Alice's riddle" as one block instead of two distant lists.
+        const ctx = this.activityContext?.();
+        const annotations = new Map<number, string[]>();
+        if (ctx) {
+            for (const activity of this.activities) {
+                const map = activity.characterAnnotations?.(ctx);
+                if (!map) continue;
+                for (const [memberNumber, extra] of map) {
+                    const existing = annotations.get(memberNumber) ?? [];
+                    existing.push(...extra);
+                    annotations.set(memberNumber, existing);
+                }
+            }
+        }
+
         for (const char of room.characters) {
             if (char.MemberNumber === me.MemberNumber) continue;
             const participating =
                 !this.participants || this.participants.has(char.MemberNumber);
             lines.push("Next character:");
             lines.push(describeCharacter(char, this.bioLength));
+            const extra = annotations.get(char.MemberNumber);
+            if (extra && extra.length > 0) {
+                lines.push(...extra);
+            }
             if (!participating) {
                 lines.push("(not participating)");
+            }
+        }
+
+        // Activity-wide sections (leaderboards, active riddles, ...) go last so
+        // the per-character picture stays adjacent to each character.
+        if (ctx) {
+            for (const activity of this.activities) {
+                const sections = activity.roomStateSections?.(ctx);
+                if (!sections || sections.length === 0) continue;
+                lines.push("");
+                lines.push(...sections);
             }
         }
 
@@ -373,8 +436,73 @@ function genderLabel(char: API_Character): string | undefined {
     return undefined;
 }
 
+/** Rendered for a restraint slot with nothing in it. */
+const EMPTY_SLOT = "—";
+
 /**
- * Produce a one-line description of a character's current state.
+ * Every restraint slot worth reporting, in a stable order.
+ *
+ * This is the union of:
+ *  - `ITEM_GROUPS`, so an empty slot is always represented; and
+ *  - any item group actually present on the character, so a slot that the
+ *    catalog classifies outside `Category: "Item"` (e.g. `Mask`) can never be
+ *    silently dropped.
+ *
+ * Order is `ITEM_GROUPS` order with any extra groups appended alphabetically,
+ * so the block is stable across turns and the model can rely on it.
+ */
+export function restraintSlots(char: API_Character): string[] {
+    const worn: string[] = [];
+    try {
+        for (const item of char.Appearance.allItems()) {
+            const group = String(item.Group ?? "");
+            if (!group) continue;
+            if (group === "Mask" || group.startsWith("Item")) {
+                worn.push(group);
+            }
+        }
+    } catch {
+        // A partially-synced appearance must not break the summary.
+    }
+
+    const ordered: string[] = [];
+    const seen = new Set<string>();
+    for (const group of ITEM_GROUPS) {
+        if (seen.has(group)) continue;
+        seen.add(group);
+        ordered.push(group);
+    }
+    for (const group of [...new Set(worn)].sort()) {
+        if (seen.has(group)) continue;
+        seen.add(group);
+        ordered.push(group);
+    }
+    return ordered;
+}
+
+/**
+ * Render the restraint slots as a single `group:item, group:item, ...` list,
+ * mirroring how clothing is rendered in the summary.
+ *
+ * Unlike clothing, every slot is always present: an empty slot appears as
+ * `ItemMouth:—`, so the model can tell "empty" from "not reported" without
+ * having to remember which groups exist.
+ */
+export function describeRestraints(char: API_Character): string {
+    return restraintSlots(char)
+        .map((group) => {
+            const item = char.Appearance.InventoryGet(group as never);
+            if (!item) return `${group}:${EMPTY_SLOT}`;
+            const vibe = vibratorState(item);
+            const base = `${group}:${item.Name}${extendedAnnotation(item)}`;
+            return vibe ? `${base} [vibe:${vibe}]` : base;
+        })
+        .join(", ");
+}
+
+/**
+ * Produce a description of a character's current state as one
+ * `|`-separated line.
  */
 export function describeCharacter(
     char: API_Character,
@@ -399,32 +527,23 @@ export function describeCharacter(
     const pose = char.Pose.map((p) => p.Name).join(", ");
     if (pose) parts.push(`pose: ${pose}`);
 
-    // const items = char.Appearance.allItems()
-    //     .filter((i) => i.Group.startsWith("Item"))
-    //     .map((i) => i.Name);
-    // if (items.length > 0) parts.push(`items: ${items.join(", ")}`);
-
-    const items = ITEM_GROUPS.filter((i) =>
-        char.Appearance.InventoryGet(i as never),
-    ).map((i) => {
-        const item = char.Appearance.InventoryGet(i as never);
-        if (!item) return i;
-        const vibe = vibratorState(item);
-        return vibe ? `${i}:${item.Name} [vibe:${vibe}]` : `${i}:${item.Name}`;
-    });
-    if (items.length > 0) parts.push(`items: ${items.join(", ")}`);
-
     const wearing = CLOTHING_GROUPS.filter((g) =>
         char.Appearance.InventoryGet(g as never),
     ).map((g) => {
         const item = char.Appearance.InventoryGet(g as never);
-        return item ? `${g}:${item.Name}` : g;
+        return item ? `${g}:${item.Name}${extendedAnnotation(item)}` : g;
     });
     if (wearing.length > 0) parts.push(`wearing: ${wearing.join(", ")}`);
 
+    // Same compact shape as `wearing:`, but with every restraint slot present
+    // so an empty slot reads as empty rather than as missing information.
+    const restraints = describeRestraints(char);
+    if (restraints) parts.push(`items: ${restraints}`);
+
+    // `restrained` and `gagged` are intentionally NOT included: both are
+    // derivable from the slot list above, and a summary flag disagreeing
+    // with it would be worse than either alone.
     if (isNaked(char)) parts.push("naked");
-    if (char.IsRestrained()) parts.push("restrained");
-    if (!char.CanTalk()) parts.push("gagged");
 
     const pos = char.MapPos;
     if (pos && (pos.X !== 0 || pos.Y !== 0)) {

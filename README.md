@@ -142,3 +142,36 @@ Set `"game": "llm"` and fill in the `llm` section of your config (see `config.sa
   extremely verbose per-token dump, so this captures the in-between. Each
   entry is tagged with a turn and iteration number so the multi-step tool
   loop of a single agent turn can be followed.
+
+#### Activities (optional modes on top of roleplay)
+
+The base bot is a roleplay bot. Extra modes are **activities** layered on top
+of it — `game` stays `"llm"`, and turning a mode on does not replace the
+roleplay. Activities are enabled under `llm.activities`:
+
+```json
+"llm": {
+    "activities": {
+        "riddles": { "enabled": true, "goal": 10 }
+    }
+}
+```
+
+Each activity contributes its own LLM tools, prompt sections, `/bot` commands,
+event hooks and a line in the bot bio. Disabling an activity removes all of
+that without touching the rest of the bot.
+
+Players can type `/bot help` (replied privately) to get the current command
+list, which is generated from the enabled commands and filtered per sender —
+superuser-only commands never appear for regular players.
+
+**Riddle mode** (`riddles`): the bot hands out riddles from
+`bin/games/riddles/riddles.csv` and tracks each player's progress. The LLM
+judges guesses itself — it sees the canonical answer and calls
+`markRiddleResult` — so there is no brittle string matching. Characters who
+enter get a one-time whisper inviting them; players are marked as priority for
+roleplay in the model's context, and `/bot riddles` (private) shows their
+progress and also opts them into roleplay. Progress is persisted to
+`riddles.state.json`.
+
+See `DEBUG.md` for the tool list, prompt layout and the debug-server endpoints.

@@ -38,6 +38,13 @@ import {
     renderActivityText,
     type ActivityDictionary,
 } from "../llm/activityDictionary";
+import { CommandHub, CORE_OWNER } from "../llm/commands/hub";
+import type { CommandContribution } from "../llm/commands/types";
+import {
+    buildActivities,
+    enabledActivityIds,
+    type LLMActivity,
+} from "../llm/activities/registry";
 
 /**
  * The LLM-powered roleplay game. It wires room events into an {@link LLMAgent}
@@ -50,6 +57,9 @@ import {
 export class LLMGame extends LogicBase {
     private agent: LLMAgent;
     private commandParser: CommandParser;
+    private commandHub: CommandHub;
+    /** Optional activities layered on top of the base roleplay bot. */
+    private activities: LLMActivity[] = [];
     /** Nickname as it was before init() modified it, restored on stop(). */
     private originalNickname: string | undefined;
     /**
@@ -74,13 +84,99 @@ export class LLMGame extends LogicBase {
         super();
         this.agent = new LLMAgent(conn, llmConfig, superusers, config.room);
         this.commandParser = new CommandParser(conn);
-        this.commandParser.register("start", this.onCommandStart);
-        this.commandParser.register("stop", this.onCommandStop);
-        this.commandParser.register("status", this.onCommandStatus);
-        this.commandParser.register("tools", this.onCommandTools);
-        this.commandParser.register("tool", this.onCommandTool);
-        this.commandParser.register("toolstatus", this.onCommandToolStatus);
-        this.commandParser.register("feedback", this.onCommandFeedback);
+        this.commandHub = new CommandHub(conn, this.commandParser);
+        this.agent.setCommandHub(this.commandHub);
+        this.registerCoreCommands();
+    }
+
+    /**
+     * Register the base bot's own commands through the hub, so activities can
+     * add to them (`append`) or deliberately override them (`replace`) without
+     * fighting over the CommandParser's single-handler-per-name map.
+     *
+     * Every handler returns its reply text rather than sending it; the hub
+     * joins all contributions into one message.
+     */
+    private registerCoreCommands(): void {
+        const reg = (
+            name: string,
+            help: string,
+            handler: Parameters<CommandHub["register"]>[0]["handler"],
+            extra: Partial<CommandContribution> = {},
+        ) =>
+            this.commandHub.register({
+                name,
+                owner: CORE_OWNER,
+                priority: 0,
+                help,
+                handler,
+                ...extra,
+            });
+
+        // `/bot help` lists every command that declares help, filtered for the
+        // sender. Always whispered: a wall of command text does not belong in
+        // public chat.
+        reg(
+            "help",
+            "Show this list of commands.",
+            (c) =>
+                this.commandHub.helpText({
+                    isSuperuser: this.isSuperuser(c.sender),
+                }),
+            { private: true },
+        );
+
+        reg(
+            "start",
+            "Start roleplaying with the bot — I will reply to you.",
+            (c) => this.onCommandStart(c.sender, c.message),
+        );
+        reg("stop", "Stop roleplaying with the bot.", (c) =>
+            this.onCommandStop(c.sender, c.message),
+        );
+        reg("status", "List current participants and enabled activities.", () =>
+            this.onCommandStatus(),
+        );
+        reg(
+            "feedback",
+            "Send a note to the bot's operator.",
+            (c) => this.onCommandFeedback(c.sender, c.message),
+            { usage: "<text>" },
+        );
+
+        // Operator commands: hidden from the listing for everyone else.
+        reg(
+            "tools",
+            "List the LLM's available tools.",
+            (c) => this.onCommandTools(c.sender, c.message),
+            { superuserOnly: true },
+        );
+        reg(
+            "tool",
+            "Invoke a tool directly, bypassing the LLM.",
+            (c) => this.onCommandTool(c.sender, c.message),
+            { superuserOnly: true, usage: "<name> [key=value ...]" },
+        );
+        reg(
+            "toolstatus",
+            "Rate-limit and leash state.",
+            (c) => this.onCommandToolStatus(c.sender, c.message),
+            { superuserOnly: true },
+        );
+    }
+
+    /**
+     * Enabled activities, for `/bot status`.
+     *
+     * Prefers the actually-attached activities (they may have failed to
+     * initialise) and falls back to the configured ids if `/bot status` runs
+     * before `init()` finished attaching them.
+     */
+    private enabledActivityLabels(): string[] {
+        if (this.activities.length > 0) {
+            return this.activities.map((a) => a.title);
+        }
+        return enabledActivityIds(this.llmConfig);
     }
 
     /**
@@ -107,10 +203,9 @@ export class LLMGame extends LogicBase {
     private onCommandTools = (
         sender: API_Character,
         msg: BC_Server_ChatRoomMessage,
-    ): void => {
+    ): string => {
         if (!this.isSuperuser(sender)) {
-            this.conn.reply(msg, "Not authorized.");
-            return;
+            return "Not authorized.";
         }
         const tools = this.agent.getTools();
         const lines = tools.map((t) => {
@@ -125,46 +220,38 @@ export class LLMGame extends LogicBase {
                 .join(", ");
             return `!tool ${t.name} ${params}`;
         });
-        this.conn.reply(
-            msg,
-            `Available tools (${tools.length}):\n${lines.join("\n")}\n\nUsage: !tool <name> [key=value ...] or !tool <name> {"key":value}`,
-        );
+        return `Available tools (${tools.length}):\n${lines.join("\n")}\n\nUsage: !tool <name> [key=value ...] or !tool <name> {"key":value}`;
     };
 
     private onCommandTool = async (
         sender: API_Character,
         msg: BC_Server_ChatRoomMessage,
-    ): Promise<void> => {
+    ): Promise<string> => {
         if (!this.isSuperuser(sender)) {
-            this.conn.reply(msg, "Not authorized.");
-            return;
+            return "Not authorized.";
         }
         const raw = this.extractRawToolArgs(msg);
         const spaceIdx = raw.indexOf(" ");
         const name = (spaceIdx === -1 ? raw : raw.slice(0, spaceIdx)).trim();
         const argsRaw = spaceIdx === -1 ? "" : raw.slice(spaceIdx + 1);
         if (!name) {
-            this.conn.reply(msg, "Usage: !tool <name> [key=value ...]");
-            return;
+            return "Usage: !tool <name> [key=value ...]";
         }
         const [args, error] = parseToolArgs(argsRaw);
         if (error) {
-            this.conn.reply(msg, error);
-            return;
+            return error;
         }
-        const result = await this.agent.runTool(name, args);
-        this.conn.reply(msg, result);
+        return this.agent.runTool(name, args);
     };
 
     private onCommandToolStatus = (
         sender: API_Character,
-        msg: BC_Server_ChatRoomMessage,
-    ): void => {
+        _msg: BC_Server_ChatRoomMessage,
+    ): string => {
         if (!this.isSuperuser(sender)) {
-            this.conn.reply(msg, "Not authorized.");
-            return;
+            return "Not authorized.";
         }
-        this.conn.reply(msg, this.agent.getToolStatus());
+        return this.agent.getToolStatus();
     };
 
     /**
@@ -189,11 +276,10 @@ export class LLMGame extends LogicBase {
     private onCommandFeedback = (
         sender: API_Character,
         msg: BC_Server_ChatRoomMessage,
-    ): void => {
+    ): string => {
         const text = this.extractRawFeedback(msg);
         if (!text) {
-            this.conn.reply(msg, "Usage: !feedback <your feedback>");
-            return;
+            return "Usage: !feedback <your feedback>";
         }
         const file = this.llmConfig.feedbackFile ?? "feedback.log";
         const line = `[${new Date().toISOString()}] ${displayName(
@@ -201,57 +287,53 @@ export class LLMGame extends LogicBase {
         )} (${sender.MemberNumber}): ${text}\n`;
         try {
             appendFileSync(file, line);
-            this.conn.reply(msg, "Thanks for the feedback!");
+            return "Thanks for the feedback!";
         } catch (e) {
             console.error("Failed to write feedback:", e);
-            this.conn.reply(msg, "Sorry, I couldn't record that.");
+            return "Sorry, I couldn't record that.";
         }
     };
 
     private onCommandStart = (
         sender: API_Character,
-        msg: BC_Server_ChatRoomMessage,
-    ): void => {
+        _msg: BC_Server_ChatRoomMessage,
+    ): string => {
         this.agent.setParticipant(sender.MemberNumber, true);
-        const safewords = (this.llmConfig.safewords).join(", ");
-        this.conn.reply(
-            msg,
+        const safewords = this.llmConfig.safewords.join(", ");
+        return (
             `Welcome, ${displayName(sender)}! You can now RP with me — say something or poke/pet me.\n` +
             `It takes me around 1 minute to reply. \n` +
-            `Commands: /bot start, /bot stop, /bot feedback. Safewords: ${safewords}.`,
+            `Commands: /bot start, /bot stop, /bot status, /bot feedback. Safewords: ${safewords}.`
         );
     };
 
     private onCommandStop = (
         sender: API_Character,
-        msg: BC_Server_ChatRoomMessage,
-    ): void => {
+        _msg: BC_Server_ChatRoomMessage,
+    ): string => {
         this.agent.setParticipant(sender.MemberNumber, false);
-        this.conn.reply(
-            msg,
-            `You are no longer a participant. I will ignore you from now on.`,
-        );
+        return `You are no longer a participant. I will ignore you from now on.`;
     };
 
-    private onCommandStatus = (
-        sender: API_Character,
-        msg: BC_Server_ChatRoomMessage,
-    ): void => {
+    /**
+     * Participant list plus the enabled activity names. No activity detail
+     * here — anything private lives behind the activity's own command.
+     */
+    private onCommandStatus = (): string => {
         const room = this.conn.chatRoom;
-        const names = this.agent
-            .getParticipants()
-            .map((n) => {
-                const c = room?.characters.find(
-                    (c) => c.MemberNumber === n,
-                );
-                return c ? displayName(c) : String(n);
-            });
-        this.conn.reply(
-            msg,
+        const names = this.agent.getParticipants().map((n) => {
+            const c = room?.characters.find((c) => c.MemberNumber === n);
+            return c ? displayName(c) : String(n);
+        });
+        const activities = this.enabledActivityLabels();
+        return [
             names.length > 0
                 ? `Participants: ${names.join(", ")}`
                 : "No participants yet. Use !start to join.",
-        );
+            activities.length > 0
+                ? `Activities: ${activities.join(", ")}`
+                : "Activities: (none)",
+        ].join("\n");
     };
 
     /**
@@ -267,6 +349,24 @@ export class LLMGame extends LogicBase {
             this.conn.accountUpdate({ Nickname: `${currentNick} BOT` });
         }
 
+        // Build and start the optional activities BEFORE the bio is written,
+        // so their bio addenda (e.g. the riddle invite) are included.
+        this.activities = buildActivities(this.llmConfig);
+        if (this.activities.length > 0) {
+            const context = this.agent.createActivityContext();
+            for (const activity of this.activities) {
+                try {
+                    await activity.init(context);
+                } catch (e) {
+                    console.error(
+                        `[activities] Failed to initialise '${activity.id}':`,
+                        e,
+                    );
+                }
+            }
+            this.agent.attachActivities(this.activities);
+        }
+
         // Append the AI disclaimer to the bio (idempotent). The original bio
         // is preserved; describeCharacter strips the disclaimer before it
         // reaches the LLM.
@@ -274,6 +374,7 @@ export class LLMGame extends LogicBase {
         this.originalBio = bio;
         var newBio = stripBotDisclaimer(bio);
         newBio = withBotDisclaimer(newBio, this.llmConfig);
+        newBio = this.withActivityBioLines(newBio);
         if (newBio !== bio) {
             this.disclaimerAdded = true;
             this.conn.setBotDescription(newBio);
@@ -311,6 +412,20 @@ export class LLMGame extends LogicBase {
         this.activityDictionary = await loadActivityDictionary();
 
         console.log("LLM bot ready. Persona loaded, agent running.");
+    }
+
+    /**
+     * Append each activity's bio addendum (if any) to the disclaimer text, so
+     * the bio advertises the enabled modes.
+     */
+    private withActivityBioLines(bio: string): string {
+        const lines: string[] = [];
+        for (const activity of this.activities) {
+            const line = activity.bioAddendum?.();
+            if (line && line.trim()) lines.push(line.trim());
+        }
+        if (lines.length === 0) return bio;
+        return `${bio.trimEnd()}\n${lines.join("\n")}\n`;
     }
 
     /**
@@ -353,10 +468,7 @@ export class LLMGame extends LogicBase {
 
         // If a character removes the leash they were holding on the bot,
         // drop them from the leashed map so we stop pinging them.
-        if (
-            message.Type === "Hidden" &&
-            message.Content === "RemoveLeash"
-        ) {
+        if (message.Type === "Hidden" && message.Content === "RemoveLeash") {
             this.agent.dropLeash(sender.MemberNumber);
             return;
         }
@@ -373,6 +485,13 @@ export class LLMGame extends LogicBase {
             }
             return;
         }
+
+        // Give activities a look at the raw message before the base bot
+        // decides anything. They must not block the stream: the base bot
+        // still forwards the message to the agent afterwards.
+        this.forwardToActivities((ctx, activity) =>
+            activity.onMessage?.(ctx, sender, message),
+        );
 
         // Ignore non-text message types. "Action" is allowed through so the
         // item add/remove events it carries (ActionUse/ActionRemove) can be
@@ -443,6 +562,30 @@ export class LLMGame extends LogicBase {
         this.agent.onIncomingMessage(sender, message);
     }
 
+    /**
+     * Run a hook for every enabled activity, isolating failures so one broken
+     * activity cannot break chat handling.
+     */
+    private forwardToActivities(
+        hook: (
+            ctx: import("../llm/activities/types").ActivityContext,
+            activity: LLMActivity,
+        ) => void,
+    ): void {
+        const ctx = this.agent.getActivityContext();
+        if (!ctx || this.activities.length === 0) return;
+        for (const activity of this.activities) {
+            try {
+                hook(ctx, activity);
+            } catch (e) {
+                console.error(
+                    `[activities] ${activity.id} event hook failed:`,
+                    e,
+                );
+            }
+        }
+    }
+
     protected onCharacterEntered(
         connection: API_Connector,
         character: API_Character,
@@ -450,6 +593,13 @@ export class LLMGame extends LogicBase {
         if (character.MemberNumber === connection.Player.MemberNumber) {
             return Promise.resolve();
         }
+
+        // Activities see every arrival (riddle mode whispers an invite to
+        // newcomers whether or not they are already participating).
+        this.forwardToActivities((ctx, activity) =>
+            activity.onCharacterEntered?.(ctx, character),
+        );
+
         if (!this.agent.isParticipant(character.MemberNumber)) {
             return Promise.resolve();
         }
@@ -463,6 +613,11 @@ export class LLMGame extends LogicBase {
         intentional: boolean,
     ): void {
         if (character.MemberNumber === connection.Player.MemberNumber) return;
+
+        this.forwardToActivities((ctx, activity) =>
+            activity.onCharacterLeft?.(ctx, character),
+        );
+
         // Was this character a participant? If so, tell the agent they left
         // and remove them from the participant set (which also releases
         // their leash if held).
@@ -521,7 +676,15 @@ export class LLMGame extends LogicBase {
     public async stop(): Promise<void> {
         this.debugServer?.close();
         this.debugServer = undefined;
-        this.agent.stop();
+
+        // Detach activity commands before stopping, then let each activity
+        // flush its persisted state.
+        for (const activity of this.activities) {
+            this.commandHub.unregisterOwner(activity.id);
+        }
+        await this.agent.stopWithActivities();
+        this.commandHub.dispose();
+        this.activities = [];
 
         // Restore the original nickname.
         if (this.originalNickname !== undefined) {
@@ -579,13 +742,9 @@ function extractActivityText(
             : undefined;
 
     const sourceChar =
-        source !== undefined
-            ? conn.chatRoom?.getCharacter(source)
-            : undefined;
+        source !== undefined ? conn.chatRoom?.getCharacter(source) : undefined;
     const targetChar =
-        target !== undefined
-            ? conn.chatRoom?.getCharacter(target)
-            : undefined;
+        target !== undefined ? conn.chatRoom?.getCharacter(target) : undefined;
 
     // Preferred: render the template from ActivityDictionary.csv. The CSV is
     // keyed by the message Content (e.g. "ChatSelf-ItemArms-Wiggle"), not by
@@ -650,8 +809,10 @@ function extractActionText(
     // Each dictionary entry is self-named via a `Tag` field, with the data
     // in sibling fields, e.g. { Tag: 'NextAsset', AssetName, GroupName } or
     // { Tag: 'DestinationCharacter', MemberNumber, Text }.
-    const dict = (message.Dictionary ??
-        []) as unknown as Record<string, unknown>[];
+    const dict = (message.Dictionary ?? []) as unknown as Record<
+        string,
+        unknown
+    >[];
     const byTag = (tag: string) => dict.find((e) => e.Tag === tag);
 
     const assetTag =
@@ -667,12 +828,11 @@ function extractActionText(
         typeof destEntry?.MemberNumber === "number"
             ? conn.chatRoom?.getCharacter(destEntry.MemberNumber)
             : undefined;
-    const targetName =
-        targetChar ? displayName(targetChar) : destEntry?.Text;
+    const targetName = targetChar ? displayName(targetChar) : destEntry?.Text;
     if (!targetName) return undefined;
 
     const verb = message.Content === "ActionUse" ? "applied" : "removed";
-    return `${targetName} had ${groupName}:${assetName} ${verb} by ${
-        displayName(sender)
-    }.`;
+    return `${targetName} had ${groupName}:${assetName} ${verb} by ${displayName(
+        sender,
+    )}.`;
 }

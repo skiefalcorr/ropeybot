@@ -17,6 +17,7 @@ import { PoseFemale3DCG } from "../catalog";
 
 export const listPosesTool: Tool = {
     name: "listPoses",
+    lookup: true,
     definition: def(
         "listPoses",
         "List all valid pose names (with their body category) so you can use valid names with setPose.",

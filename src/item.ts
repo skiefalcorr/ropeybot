@@ -62,8 +62,21 @@ export class API_AppearanceItem {
         private data: BC_AppearanceItem,
     ) {
         const def = getAssetDef(AssetGet(data.Group, data.Name));
-        if (def && def.Extended) {
-            this._extendedItem = new ExtendedItem(this, data);
+        // The client treats any asset that has an extended-item config as
+        // extended: `TypedItemRegister`/`ModularItemRegister` set
+        // `Asset.Extended = true` themselves, so the `Extended` flag in
+        // Female3DCG.js is not the real gate. Keying off the resolved config
+        // keeps us aligned with what the game actually allows, and skips
+        // assets whose config is missing or has a broken CopyConfig chain.
+        if (def && resolveExtendedAsset(data.Group, data.Name)) {
+            try {
+                this._extendedItem = new ExtendedItem(this, data);
+            } catch (e) {
+                console.warn(
+                    `No usable extended config for ${data.Group}:${data.Name}`,
+                    e,
+                );
+            }
         }
     }
 
@@ -125,18 +138,14 @@ export class API_AppearanceItem {
      * Explicit `color1` / `color2` arguments override the character's
      * colors. Remaining layers stay "Default".
      */
-    public setColorFromCharacter(
-        color1?: string,
-        color2?: string,
-    ): void {
+    public setColorFromCharacter(color1?: string, color2?: string): void {
         const layers = this.Asset.countColorableLayers();
         if (layers === 0) return;
 
-        const hair = this.character.Appearance.InventoryGet("HairFront")
-            ?.GetColor();
+        const hair =
+            this.character.Appearance.InventoryGet("HairFront")?.GetColor();
         const hairColor = Array.isArray(hair) ? hair[0] : hair;
-        const eyes = this.character.Appearance.InventoryGet("Eyes")
-            ?.GetColor();
+        const eyes = this.character.Appearance.InventoryGet("Eyes")?.GetColor();
         const eyeColor = Array.isArray(eyes) ? eyes[0] : eyes;
 
         const c1 = color1 ?? hairColor;
@@ -240,21 +249,40 @@ export class API_AppearanceItem {
     };
 }
 
-function resolveExtendedAsset(group: AssetGroupName, asset: string) {
-    let config = getExtendedAssetDef(AssetGet(group, asset));
+/**
+ * Resolve an asset's extended-item configuration, following `CopyConfig`
+ * references until a concrete config is reached. Exported so callers outside
+ * this file (the LLM tool layer) do not have to reimplement the walk.
+ *
+ * Returns null for assets without an extended config, and for `CopyConfig`
+ * cycles rather than looping forever. Unlike `getExtendedAssetDef` this is
+ * quiet: it is consulted for every worn item, and most groups simply have no
+ * extended config, which is not a warning worth logging.
+ */
+export function resolveExtendedAsset(
+    group: AssetGroupName,
+    asset: string,
+): AssetArchetypeConfig | null {
+    let config: AssetArchetypeConfig | null =
+        AssetFemale3DCGExtended[group]?.[asset] ?? null;
+    const seen = new Set<string>([`${group}:${asset}`]);
     while (config && config.CopyConfig) {
-        config = getExtendedAssetDef(
-            AssetGet(
-                config.CopyConfig.GroupName ?? group,
-                config.CopyConfig.AssetName,
-            ),
-        );
+        const nextGroup = (config.CopyConfig.GroupName ??
+            group) as AssetGroupName;
+        const nextAsset = config.CopyConfig.AssetName;
+        const key = `${nextGroup}:${nextAsset}`;
+        if (seen.has(key)) {
+            console.warn(`CopyConfig cycle while resolving ${group}:${asset}`);
+            return null;
+        }
+        seen.add(key);
+        config = AssetFemale3DCGExtended[nextGroup]?.[nextAsset] ?? null;
     }
     return config;
 }
 
 export class ExtendedItem {
-    private extendedDef: AssetArchetypeConfig;
+    private readonly extendedDef: AssetArchetypeConfig;
 
     constructor(
         private itemType: API_AppearanceItem,
@@ -296,16 +324,209 @@ export class ExtendedItem {
         const optionSet = this.extendedDef.Options?.[optionSetIdx];
 
         this.item.Property ??= {};
-        const oldEffect = this.item.Property.Effect;
-        Object.assign(this.item.Property, optionSet?.Property, {
-            TypeRecord: { typed: optionSetIdx },
-        });
-        if (oldEffect)
-            this.item.Property.Effect = Array.from(
-                new Set([...oldEffect, ...(optionSet?.Property?.Effect ?? [])]),
-            );
+        this.applyOptionProperties(optionSetIdx, optionSet);
         this.fixupAllowActivePose(); // we probably need to do this other times too
         this.itemType.queueUpdate();
+    }
+
+    /**
+     * Swap the selected option's properties in, the same way the game does it.
+     *
+     * The client runs `PropertyDifference(item.Property, previousOption.Property)`
+     * followed by `PropertyUnion(item.Property, newOption.Property)`
+     * (ExtendedItem.js `ExtendedItemSetOption`). Doing a plain `Object.assign`
+     * instead only ever adds or overwrites, which diverges from the game in two
+     * ways: properties the old option contributed but the new one does not stay
+     * glued to the item (`SetPose`, `Block`, `Hide`, `AllowActivity`), and
+     * additive keys accumulate — `Difficulty`/`HeightModifier` are summed, and
+     * array keys such as `Effect` are unioned, so switching back and forth
+     * inflates them.
+     *
+     * Keys declared in `BaselineProperty` are excluded from the removal pass,
+     * matching the client, which strips them from the previous option's
+     * properties before diffing. That protects baseline state and anything a
+     * script hook owns.
+     */
+    private applyOptionProperties(
+        newOptionIdx: number,
+        newOption: TypedItemOptionConfig | undefined,
+    ): void {
+        if (this.extendedDef.Archetype !== "typed") return;
+        const prop = this.item.Property as Record<string, unknown>;
+        const options = this.extendedDef.Options ?? [];
+
+        // Only undo the previous option's properties when a selection was
+        // actually recorded.
+        //
+        // The client can always subtract the previous option because applying an
+        // extended item runs its init, which writes the first option's
+        // properties onto the item. We do not do that on `AddItem`, so an item
+        // we just added has an empty `Property` and subtracting option 0 would
+        // drive `Difficulty` negative and strip effects it never had.
+        const recorded = (
+            prop["TypeRecord"] as Record<string, unknown> | undefined
+        )?.["typed"];
+        let previousIdx =
+            typeof recorded === "number"
+                ? recorded
+                : options.findIndex(
+                      (o) => o.Name === (prop["Type"] as string | undefined),
+                  );
+        if (previousIdx < 0 || previousIdx >= options.length) {
+            previousIdx = -1;
+        }
+        const previousOption =
+            previousIdx === -1 ? undefined : options[previousIdx];
+
+        const baselineKeys = new Set(
+            Object.keys(this.extendedDef.BaselineProperty ?? {}),
+        );
+
+        const previousProperty = previousOption?.Property as
+            Record<string, unknown> | undefined;
+        if (previousProperty) {
+            for (const [key, value] of Object.entries(previousProperty)) {
+                if (key === "TypeRecord") continue;
+                if (baselineKeys.has(key)) continue;
+                this.differenceProperty(prop, key, value);
+            }
+        }
+
+        const nextProperty = newOption?.Property as
+            Record<string, unknown> | undefined;
+        if (nextProperty) {
+            for (const [key, value] of Object.entries(nextProperty)) {
+                if (key === "TypeRecord") continue;
+                this.unionProperty(prop, key, value);
+            }
+        }
+
+        prop["TypeRecord"] = {
+            ...((prop["TypeRecord"] as Record<string, unknown>) ?? {}),
+            typed: newOptionIdx,
+        };
+
+        // A locked item must keep the Lock effect; the client re-adds it after
+        // swapping properties for the same reason.
+        if (
+            prop["LockedBy"] &&
+            Array.isArray(prop["Effect"]) &&
+            !(prop["Effect"] as unknown[]).includes("Lock")
+        ) {
+            (prop["Effect"] as unknown[]).push("Lock");
+        }
+    }
+
+    /**
+     * Remove one property the previous option contributed, mirroring the
+     * client's `PropertyDifference`: numeric `Difficulty`/`HeightModifier` are
+     * subtracted rather than deleted, array entries present in the previous
+     * option are filtered out (and the key dropped once empty), everything else
+     * is deleted outright.
+     */
+    private differenceProperty(
+        prop: Record<string, unknown>,
+        key: string,
+        value: unknown,
+    ): void {
+        if (key === "Difficulty" || key === "HeightModifier") {
+            const current =
+                typeof prop[key] === "number" ? (prop[key] as number) : 0;
+            const delta = typeof value === "number" ? value : 0;
+            prop[key] = current - delta;
+            return;
+        }
+
+        if (key === "Tint" && Array.isArray(value)) {
+            const current = Array.isArray(prop[key])
+                ? (prop[key] as unknown[])
+                : [];
+            prop[key] = current.filter(
+                (i) => !value.some((v) => this.deepEqual(i, v)),
+            );
+            if ((prop[key] as unknown[]).length === 0) delete prop[key];
+            return;
+        }
+
+        if (Array.isArray(value)) {
+            if (Array.isArray(prop[key])) {
+                const current = prop[key] as unknown[];
+                const kept = current.filter((i) => !value.includes(i));
+                if (kept.length > 0) {
+                    prop[key] = kept;
+                    return;
+                }
+            }
+            delete prop[key];
+            return;
+        }
+
+        delete prop[key];
+    }
+
+    /**
+     * Add one property the newly selected option contributes, mirroring the
+     * client's `PropertyUnion`: numeric `Difficulty`/`HeightModifier` are
+     * summed, arrays are unioned without duplicates, everything else is
+     * assigned.
+     */
+    private unionProperty(
+        prop: Record<string, unknown>,
+        key: string,
+        value: unknown,
+    ): void {
+        if (key === "Difficulty" || key === "HeightModifier") {
+            const current =
+                typeof prop[key] === "number" ? (prop[key] as number) : 0;
+            const delta = typeof value === "number" ? value : 0;
+            prop[key] = current + delta;
+            return;
+        }
+
+        if (key === "Tint" && Array.isArray(value)) {
+            const current = Array.isArray(prop[key])
+                ? (prop[key] as unknown[])
+                : [];
+            prop[key] = [
+                ...current,
+                ...value.filter(
+                    (v) => !current.some((c) => this.deepEqual(c, v)),
+                ),
+            ];
+            return;
+        }
+
+        if (Array.isArray(value)) {
+            const current = Array.isArray(prop[key])
+                ? (prop[key] as unknown[])
+                : [];
+            prop[key] = [
+                ...current,
+                ...value.filter((i) => !current.includes(i)),
+            ];
+            return;
+        }
+
+        prop[key] = value;
+    }
+
+    /**
+     * Structural comparison, used for `Tint` entries (objects), matching the
+     * client's `CommonObjectEqual`.
+     */
+    private deepEqual(a: unknown, b: unknown): boolean {
+        if (a === b) return true;
+        if (
+            a &&
+            b &&
+            typeof a === "object" &&
+            typeof b === "object" &&
+            !Array.isArray(a) &&
+            !Array.isArray(b)
+        ) {
+            return JSON.stringify(a) === JSON.stringify(b);
+        }
+        return false;
     }
 
     private fixupAllowActivePose(): void {

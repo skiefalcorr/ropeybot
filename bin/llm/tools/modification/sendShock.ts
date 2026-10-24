@@ -12,11 +12,7 @@
  * limitations under the License.
  */
 
-import {
-    API_AppearanceItem,
-    AssetGet,
-    getExtendedAssetDef,
-} from "bc-bot";
+import { API_AppearanceItem, AssetGet, getExtendedAssetDef } from "bc-bot";
 import {
     Tool,
     def,
@@ -68,7 +64,7 @@ export function isShockItem(item: API_AppearanceItem): boolean {
     );
     if (!config) return false;
 
-    if (item.Name.toLowerCase().includes("shock")){
+    if (item.Name.toLowerCase().includes("shock")) {
         return true;
     }
 
@@ -82,8 +78,9 @@ export function isShockItem(item: API_AppearanceItem): boolean {
     if (options?.some((o) => hasShockLevel(o.Property))) return true;
 
     // Modular items: Modules[].Options[].Property
-    const modules = (config as { Modules?: { Options?: { Property?: unknown }[] }[] })
-        .Modules;
+    const modules = (
+        config as { Modules?: { Options?: { Property?: unknown }[] }[] }
+    ).Modules;
 
     if (modules?.some((m) => m.Options?.some((o) => hasShockLevel(o.Property))))
         return true;
@@ -93,6 +90,7 @@ export function isShockItem(item: API_AppearanceItem): boolean {
 
 export const sendShockTool: Tool = {
     name: "sendShock",
+    history: "action",
     definition: def(
         "sendShock",
         "Send an electric shock to a character wearing a shock item (shock collar, shock plug, shock clamps, etc.). The character must already have the item in the given group. Level: 0 low, 1 medium, 2 high.",
@@ -156,11 +154,7 @@ export const sendShockTool: Tool = {
                 "Action" as never,
                 `${group}AccessoriesCollarShockUnitSet${LEVEL_NAMES[level]}`,
                 undefined,
-                [
-                    assetEntry,
-                    { SourceCharacter: botMember },
-                    destinationEntry,
-                ],
+                [assetEntry, { SourceCharacter: botMember }, destinationEntry],
             );
         }
 
@@ -174,7 +168,8 @@ export const sendShockTool: Tool = {
             assetEntry,
         ];
         const intensity = SHOCK_INTENSITY[level];
-        if (intensity !== undefined) triggerDict.push({ ShockIntensity: intensity });
+        if (intensity !== undefined)
+            triggerDict.push({ ShockIntensity: intensity });
         triggerDict.push({
             Tag: "FocusAssetGroup",
             FocusGroupName: group,

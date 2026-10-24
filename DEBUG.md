@@ -8,12 +8,12 @@ when you need to test tools or diagnose live behavior.
 ## Prerequisites
 
 1. The user's `config.json` must have:
-   - `"game": "llm"`
-   - `"llm.debugPort": <port>` (e.g. `9377`) — enables the debug HTTP server
-   - `"llm.llmLog": "llm.log"` (recommended) — enables the JSONL LLM log that
-     `/llmlog` reads
-   - `"superusers": [...]` — not needed for the debug server, but needed for
-     the in-game `!tool` commands
+    - `"game": "llm"`
+    - `"llm.debugPort": <port>` (e.g. `9377`) — enables the debug HTTP server
+    - `"llm.llmLog": "llm.log"` (recommended) — enables the JSONL LLM log that
+      `/llmlog` reads
+    - `"superusers": [...]` — not needed for the debug server, but needed for
+      the in-game `!tool` commands
 2. The bot process is running: `npx tsx bin/main.ts config.json`
    (start it in the background and redirect output to a log file, e.g.
    `bot.log`, so console output — including `LLM tool call: ...` lines — is
@@ -94,6 +94,28 @@ Returns 404 if `llmLog` is not configured.
 curl -s "http://127.0.0.1:9377/llmlog?limit=5"
 ```
 
+### `GET /activities`
+
+Every enabled activity with its tool count and debug snapshot. For riddle
+mode this includes the goal, pool size, every tracked player (state, current
+riddle, attempts, solves) and the leaderboard.
+
+```
+curl -s http://127.0.0.1:9377/activities
+```
+
+### `POST /activities/reset`
+
+Reset one activity's runtime state. Body: `{ "id": "<activityId>" }`.
+Returns 404 with the list of available ids if the id is unknown.
+
+```
+curl -s -X POST http://127.0.0.1:9377/activities/reset -d '{"id":"riddles"}'
+```
+
+This is the fast way to clear riddle progress between live tests without
+editing `riddles.state.json` by hand.
+
 ### `POST /stop`
 
 Shuts the bot down cleanly (runs the same cleanup as SIGINT: closes the debug
@@ -115,6 +137,201 @@ curl -s -X POST http://127.0.0.1:9377/stop
 6. Fix code, then: POST /stop (or kill the process), recompile if src/ changed
    (cd src && npm run compile), restart from step 1
 ```
+
+## Activity layer (riddle mode)
+
+Modes such as riddles are implemented as **activities** layered on top of the
+base roleplay bot — `config.game` stays `"llm"`. An activity contributes LLM
+tools, prompt sections, `/bot` commands, event hooks and a bio line; the base
+bot owns the connection and the turn loop.
+
+Enable it in `config.json`:
+
+```json
+"llm": {
+    "activities": {
+        "riddles": { "enabled": true, "goal": 10 }
+    }
+}
+```
+
+### What the riddle activity adds
+
+| Piece              | Effect                                                                                                                                                 |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `getRiddles`       | N random riddles (`id`, question, answer), optionally excluding riddles a player already solved.                                                       |
+| `getSingleRiddle`  | One random riddle; with a player given, it is assigned immediately. The fallback when the LLM loses the thread in full RP.                             |
+| `assignRiddle`     | Records what the LLM actually asked (`riddleId`, or raw `question` + `answer`).                                                                        |
+| `markRiddleResult` | **The LLM's verdict.** `correct: true/false`, optional `giveUp`, `guessedAnswer`, `reason`. The only thing that changes progress.                      |
+| `getRiddleStatus`  | One player (with their current riddle and answer) or the leaderboard.                                                                                  |
+| `clearRiddle`      | Returns a player to idle so they can get the next riddle.                                                                                              |
+| `/bot riddles`     | Private whisper with the sender's progress. Also opts them into roleplay (same as `/bot start`). `/bot riddles top`, `/bot riddles reset` (superuser). |
+
+There is no deterministic answer matching: the model judges guesses itself.
+The canonical answer is included in the room snapshot per player
+(`answersInContext`, default true); set it to `false` if the model leaks
+answers into character.
+
+### Where progress lives
+
+`llm.activities.riddles.stateFile` (default `riddles.state.json`). Writes are
+debounced and atomic (temp file + rename), and flushed on shutdown. Deleting
+the file resets everyone.
+
+### Restraint slots in the character summary
+
+Restraints are rendered as a compact `group:item` list on the summary line,
+mirroring how clothing is shown — but with **every slot present**:
+
+```
+Loona (member #144334) | female | bio: … | pose: Standing | items: ItemFeet:—, ItemLegs:PawPaddedPetsuitLegs, ItemArms:PawPaddedPetsuitArms, ItemNeck:SpikeCollar, ItemMouth:BallGag, ItemMouth2:—, ItemMouth3:—, ItemHead:LeatherBlindfold, … | naked
+```
+
+Why:
+
+- **Every slot is always listed**, with `—` for empty. Omitting an empty slot
+  would leave the model unable to tell "empty" from "not reported", which is
+  the whole reason for the change.
+- The slot list is the **union** of `ITEM_GROUPS` and any item group actually
+  present on the character, so a group the catalog does not classify as
+  `Category: "Item"` (e.g. `Mask`) can never be silently dropped.
+- Order is `ITEM_GROUPS` order with extras appended alphabetically, so the
+  line is stable across turns.
+- `ItemMouth`, `ItemMouth2` and `ItemMouth3` are three independent slots and
+  are reported separately — `bin/hub/logic/kidnappersGameRoom.ts` relies on
+  that distinction.
+- Vibrator state is folded into the value (`Vibrator [vibe:high]`).
+- `restrained` and `gagged` are **not** in the summary: both are derivable
+  from the slot list, and a flag disagreeing with the list would be worse
+  than either alone. `naked` stays because it also weighs clothing.
+
+Cost is one entry per item group (28 today) per character per turn.
+
+### Prompt layout
+
+- Riddle rules go into the **static** system prompt (`systemSections`), so the
+  KV cache stays useful across turns.
+- Per-player progress appears under each character in the fresh room-state
+  snapshot (`characterAnnotations`): `RIDDLE PLAYER (priority for roleplay)`,
+  solve count, current riddle and answer.
+- The leaderboard and any in-flight riddles go at the end of the snapshot
+  (`roomStateSections`).
+
+### Tool metadata
+
+A tool declares how the agent should treat it, instead of the agent naming it
+in a hardcoded list. This is what lets an activity contribute a tool that
+blocks `endTurn` or persists to history with no edit to `agent.ts`.
+
+| Field                   | Effect                                                                                                                         |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `lookup: true`          | Read-only. `endTurn` in the same batch is refused, and the "Wardrobe" emoticon is shown while the model considers the results. |
+| `blocksEndTurn: true`   | The result must be inspected before ending the turn (e.g. a room change the server may reject). Implied by `lookup`.           |
+| `history: "action"`     | Persist the result into the rolling cross-turn history as an assistant action.                                                 |
+| `history: "roomChange"` | Same, tagged as a room change.                                                                                                 |
+
+Without `history`, a result lives only in the current turn's tool message and
+is forgotten on the next turn.
+
+Current assignments:
+
+| Tools                                                                                                                          | Flags                                     |
+| ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
+| `listItems`, `listClothing`, `listPoses`, `getRiddles`, `getRiddleStatus`                                                      | `lookup`                                  |
+| `getSingleRiddle`                                                                                                              | `lookup` + `history: "action"`            |
+| `createRoom`, `joinRoom`, `leaveRoom`                                                                                          | `blocksEndTurn` + `history: "roomChange"` |
+| `addItem`, `removeItem`, `stripAll`, `setVibrator`, `sendShock`, `lockItem`, `assignRiddle`, `markRiddleResult`, `clearRiddle` | `history: "action"`                       |
+
+The `endTurn` refusal names the tools actually present in the batch, so it
+stays accurate as tools are added.
+
+### Tool results must not contain instructions
+
+Tool results report state; they do not tell the model what to do next. The
+model reads the result and decides on its own.
+
+- **Successful results:** facts only — never "now call X", "ask this in
+  character", or "congratulate them".
+- **Error results:** may include a short recovery hint (e.g. `Use listItems to
+find valid names`). An error with no hint risks the same mistake looping,
+  and errors never reach history anyway.
+
+History is written once per tool, from the tool result, via the `history`
+flag. Tools do not push history entries themselves — there is no second
+channel to keep in sync.
+
+### Command hub
+
+`/bot` commands are resolved by `CommandHub`, not by `CommandParser` directly.
+Contributions are either `replace` (compete for the base slot, highest
+priority wins) or `append` (output stacked after the base). Handlers return
+text; the hub sends one assembled reply. This is what lets an activity add
+to `/bot status` or override it, and what keeps `/bot riddles` private via
+`private: true`.
+
+Each contribution can carry advertising metadata:
+
+| Field           | Effect                                                                                                |
+| --------------- | ----------------------------------------------------------------------------------------------------- |
+| `help`          | One-line description. Omit it to keep the command out of `/bot help` (aliases, internal hooks).       |
+| `usage`         | Suffix shown after the name, e.g. `"<text>"` → `/bot feedback <text>`.                                |
+| `section`       | Help grouping. Defaults to `"General"`, which is always listed first; the rest follow alphabetically. |
+| `superuserOnly` | Hide from `/bot help` unless the sender is a superuser.                                               |
+| `private`       | Send the assembled reply as a whisper instead of a public reply.                                      |
+
+### `/bot help`
+
+Lists commands dynamically from the hub — nothing is hardcoded, so enabling an
+activity adds its section automatically. Always replied as a **private
+whisper**: a wall of command text does not belong in public chat.
+
+Filtering:
+
+- contributions without `help` are never listed;
+- `superuserOnly` commands (`tools`, `tool`, `toolstatus`) appear **only** for
+  superusers, so the operator surface never leaks to regular players;
+- several contributions to the same command collapse to one line (the base
+  definition wins);
+- grouped by section, `General` first, alphabetical within each section.
+
+A regular player sees:
+
+```
+Available commands:
+
+[General]
+/bot feedback <text> — Send a note to the bot's operator.
+/bot help — Show this list of commands.
+/bot start — Start roleplaying with the bot — I will reply to you.
+/bot status — List current participants and enabled activities.
+/bot stop — Stop roleplaying with the bot.
+
+[Riddles]
+/bot riddles [top|reset] — Your riddle progress (also opts you into roleplay).
+```
+
+A superuser additionally gets `tool`, `tools` and `toolstatus` under `[General]`.
+
+`/bot status` lists participants plus the enabled activity names only — all
+riddle detail is behind `/bot riddles`.
+
+## Offline tests
+
+No BC connection or LLM needed:
+
+```
+npx tsx bin/games/riddles/riddleTest.ts    # riddle mode
+npx tsx bin/llm/commands/hubTest.ts        # command hub
+```
+
+The riddle suite covers the CSV parser (quotes, commas in quotes, CRLF, BOM,
+embedded newlines), stable ids, de-duplication, random picking, every
+state-machine transition, the activity's tools end to end, registry gating and
+context injection.
+
+The hub suite covers `/bot help` visibility (superuser filtering, de-duping,
+section grouping and ordering), the empty-listing case, and the
+replace/append/priority/private dispatch rules.
 
 ## Gotchas
 

@@ -26,6 +26,8 @@ import { removeItemTool } from "./items/removeItem";
 import { stripAllTool } from "./items/stripAll";
 import { lockItemTool } from "./modification/lockItem";
 import { setVibratorTool } from "./modification/setVibrator";
+import { listExtendedOptionsTool } from "./extended/listExtendedOptions";
+import { setExtendedTypeTool } from "./extended/setExtendedType";
 import { sendShockTool } from "./modification/sendShock";
 import { setPoseTool } from "./body/setPose";
 import { setExpressionTool } from "./body/setExpression";
@@ -59,6 +61,9 @@ export function buildTools(): Tool[] {
         setExpressionTool,
         // Locks
         lockItemTool,
+        // Extended item variants
+        listExtendedOptionsTool,
+        setExtendedTypeTool,
         // Vibrator control
         setVibratorTool,
         // Shock control

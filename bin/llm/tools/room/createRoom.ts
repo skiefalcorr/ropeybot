@@ -30,13 +30,16 @@ const ROLES = ["All", "Admin", "Whitelist"] as const;
 export const createRoomTool: Tool = {
     name: "createRoom",
     category: "room",
+    blocksEndTurn: true,
+    history: "roomChange",
     definition: def(
         "createRoom",
         "Create a new chat room and enter it. If you want to take anyone with you, you need to leash them first. Unspecified settings are inherited from the bot's configured room. The bot is automatically added as an admin of the new room.",
         {
             name: {
                 type: "string",
-                description: "Name of the room to create (required; accepts letters, numbers and spaces; no apostrophes)",
+                description:
+                    "Name of the room to create (required; accepts letters, numbers and spaces; no apostrophes)",
             },
             description: {
                 type: "string",
@@ -85,13 +88,16 @@ export const createRoomTool: Tool = {
             },
             locked: {
                 type: "boolean",
-                description: "Whether the room is locked (no entry or exit except for admins).",
+                description:
+                    "Whether the room is locked (no entry or exit except for admins).",
             },
         },
         ["name"],
     ),
     handler: async (args, ctx) => {
-        const name = String(args.name ?? "").trim().replace(/'/g, '');
+        const name = String(args.name ?? "")
+            .trim()
+            .replace(/'/g, "");
         if (!name) return "Error: room name is required.";
         const limited = checkRateLimit(ctx);
         if (limited) return limited;
@@ -185,7 +191,9 @@ export const createRoomTool: Tool = {
             return `Existing room already had the same name. Joined room '${name}'.`;
         }
         if (!ok) {
-            console.log(`Failed to join room ${roomDef.Name}; trying to create.`)
+            console.log(
+                `Failed to join room ${roomDef.Name}; trying to create.`,
+            );
             ok = await ctx.conn.ChatRoomCreate(roomDef);
         }
         if (!ok) {
